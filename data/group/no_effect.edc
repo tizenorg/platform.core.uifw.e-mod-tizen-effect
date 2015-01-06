@@ -1,0 +1,114 @@
+group { name: "e/comp/effects/no-effect";
+     alias: "e/comp/effects/none";
+     script {
+          public message(Msg_Type:type, id, ...) {
+             if ((type == MSG_INT_SET) && (id == 0)) {
+                  /*set state */
+                  new st;
+                  st = getarg(2);
+                  if (st == 0)
+                    {
+                       set_state(PART:"clipper", "default", 0.0);
+                       set_state(PART:"shower", "default", 0.0);
+                       set_state(PART:"e.swallow.content", "default", 0.0);
+                    }
+                  else if (st == 1)
+                    {
+                       set_state(PART:"clipper", "visible", 0.0);
+                       set_state(PART:"shower", "visible", 0.0);
+                       set_state(PART:"e.swallow.content", "visible", 0.0);
+                    }
+             } else if ((type == MSG_INT_SET) && (id == 1))
+               {
+               }
+          }
+     }
+   parts {
+        part { name: "clipper";
+        type: RECT;
+        mouse_events: 0;
+        description { state: "default" 0.0;
+           color: 255 255 255 255;
+           rel1.relative: -1.0  -1.0;
+           rel1.offset:  -9999 -9999;
+           rel2.relative:  2.0   2.0;
+           rel2.offset:   9999  9999;
+           visible: 1;
+        }
+        description { state: "visible" 0.0;
+           inherit: "default" 0.0;
+           color: 255 255 255 255;
+        }
+        description { state: "hide" 0.0;
+           inherit: "default" 0.0;
+        }             
+        }
+        part { name: "shower";
+        type: SPACER;
+        mouse_events: 0;
+        description { state: "default" 0.0;
+           rel1.relative: 0 0;
+           rel2.relative: 1 1;
+        }
+        description { state: "visible" 0.0;
+           inherit: "default" 0.0;
+           rel1.relative: 0 0;
+           rel1.offset:   0 0;
+           rel2.relative: 1 1;
+        }
+        description { state: "hide" 0.0;
+           inherit: "default" 0.0;
+           rel1.relative: 0.0 0.0;
+           rel1.offset:   0   0;
+           rel2.relative: 1.0 1.0;
+        }
+     }
+      part { name: "e.swallow.content"; type: SWALLOW;
+        type: SWALLOW;
+        clip_to: "clipper";
+        mouse_events: 0;
+        description { state: "default" 0.0;
+           rel1.to: "shower";
+           rel2.to: "shower";
+        }
+        description { state: "visible" 0.0;
+           rel1.to: "shower";
+           rel2.to: "shower";
+        }
+        description { state: "hide" 0.0;
+           rel1.to: "shower";
+           rel2.to: "shower";
+        }
+      }
+   }
+    programs {
+     program { name: "show1";
+        signal: "e,action,go";
+        source: "e";
+        filter: "shower" "default";
+        action: STATE_SET "visible" 0.0;
+        target: "shower";
+        target: "clipper";
+        target: "e.swallow.content";
+        after: "done";
+     }
+     program { name: "hide1";
+        signal: "e,action,go";
+        source: "e";
+        filter: "shower" "visible";
+        action: STATE_SET "hide" 0.0;
+        target: "shower";
+        target: "clipper";
+        after: "hide2";
+     }
+     program { name: "hide2";
+        action: STATE_SET "default" 0.0;
+        target: "shower";
+        target: "clipper";
+        after: "done";
+     }
+     program { name: "done";
+        action: SIGNAL_EMIT "e,action,done" "e";
+     }
+    }
+}

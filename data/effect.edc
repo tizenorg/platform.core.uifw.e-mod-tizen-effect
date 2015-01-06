@@ -1,0 +1,16 @@
+#define COMP_EFFECT_DURATION 0.4
+#define COMP_EFFECT_DURATION_FAST 0.2
+
+collections {
+
+   /*-----------------------------------------------------*/
+   /* group "e/comp/effects/no-effect"                    */
+   /*-----------------------------------------------------*/
+   #include "group/no_effect.edc"
+
+   /*-----------------------------------------------------*/
+   /* group "e/comp/effects/fade"                         */
+   /*-----------------------------------------------------*/
+   #include "group/fade.edc"
+}
+
