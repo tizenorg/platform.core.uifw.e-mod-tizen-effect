@@ -1,3 +1,5 @@
+%bcond_with x
+
 Name: e-mod-tizen-effect
 Version: 0.0.1
 Release: 1
@@ -12,6 +14,10 @@ BuildRequires: pkgconfig(ecore)
 BuildRequires: pkgconfig(edje)
 BuildRequires:  gettext
 BuildRequires:  edje-tools
+
+%if !%{with x}
+ExclusiveArch:
+%endif
 
 %description
 This package provides various window effect(animation)
@@ -41,8 +47,7 @@ rm -rf %{buildroot}
 make install DESTDIR=%{buildroot}
 
 # clear useless textual files
-find  %{buildroot}/usr/lib/enlightenment/modules/%{name} -name *.la | xargs rm
-#find  %{buildroot}/usr/lib/enlightenment/modules/%{name} -name *.a | xargs rm
+find  %{buildroot}%{_libdir}/enlightenment/modules/%{name} -name *.la | xargs rm
 
 
 %files
