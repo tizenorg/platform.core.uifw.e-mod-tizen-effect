@@ -40,8 +40,8 @@ make
 rm -rf %{buildroot}
 
 # for license notification
-#mkdir -p %{buildroot}/usr/share/license
-#cp -a %{_builddir}/%{buildsubdir}/COPYING %{buildroot}/usr/share/license/%{name}
+mkdir -p %{buildroot}/usr/share/license
+cp -a %{_builddir}/%{buildsubdir}/COPYING %{buildroot}/usr/share/license/%{name}
 
 # install
 make install DESTDIR=%{buildroot}
@@ -54,5 +54,5 @@ find  %{buildroot}%{_libdir}/enlightenment/modules/%{name} -name *.la | xargs rm
 %defattr(-,root,root,-)
 %{_libdir}/enlightenment/modules/e-mod-tizen-effect
 %{_datadir}/enlightenment/data/themes
-#/usr/share/license/%{name}
+/usr/share/license/%{name}
 
