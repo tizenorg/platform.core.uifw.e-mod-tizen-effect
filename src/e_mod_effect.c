@@ -4,7 +4,8 @@
 E_Comp *_comp = NULL;
 Eina_List *_providers = NULL;
 Eina_List *_event_hdlrs = NULL;
-Eina_List *_stack = NULL;
+Eina_List *_stack_old = NULL;
+Eina_List *_stack_new = NULL;
 
 static void
 _e_mod_effect_object_setup(E_Client *ec)
@@ -26,63 +27,70 @@ _e_mod_effect_stack_update()
    E_Client *ec;
    Evas_Object *o;
 
+   eina_list_free(_stack_old);
+   _stack_old = eina_list_clone(_stack_new);
    for (o = evas_object_top_get(_comp->evas); o; o = evas_object_below_get(o))
      {
         ec = evas_object_data_get(o, "E_Client");
         if (!ec) continue;
         if (!e_util_strcmp(evas_object_name_get(o), "layer_obj")) continue;
 
-        _stack = eina_list_remove(_stack, ec);
-        _stack = eina_list_append(_stack, ec);
+        _stack_new = eina_list_remove(_stack_new, ec);
+        _stack_new = eina_list_append(_stack_new, ec);
      }
+}
+
+static Eina_Bool
+_e_mod_effect_visibility_check(E_Client *ec, Eina_List *stack)
+{
+   Eina_List *l;
+   E_Client *_ec;
+   Eina_Tiler *tiler;
+   Eina_Rectangle r;
+   Eina_Bool vis = EINA_TRUE;
+
+   if (!stack) return EINA_FALSE;
+
+   tiler = eina_tiler_new(ec->zone->w, ec->zone->h);
+   eina_tiler_tile_size_set(tiler, 1, 1);
+   EINA_RECTANGLE_SET(&r, ec->zone->x, ec->zone->y, ec->zone->w, ec->zone->h);
+   eina_tiler_rect_add(tiler, &r);
+
+   EINA_LIST_FOREACH(stack, l, _ec)
+     {
+        if (_ec == ec) break;
+        if ((_ec->iconic) || (!_ec->visible) || (_ec->argb)) continue;
+
+        EINA_RECTANGLE_SET(&r, _ec->x, _ec->y, _ec->w, _ec->h);
+        eina_tiler_rect_del(tiler, &r);
+
+        if (eina_tiler_empty(tiler))
+          {
+             vis = EINA_FALSE;
+             break;
+          }
+     }
+   eina_tiler_free(tiler);
+
+   return vis;
 }
 
 static const char*
 _e_mod_effect_restack_effect_check(E_Client *ec)
 {
-   Evas_Object *o;
    const char* emission = NULL;
-   Eina_List *l;
-   E_Client *_ec;
+   Eina_Bool v1, v2;
 
    if (!ec->visible) return NULL;
    if (ec->new_client) return NULL;
 
-   o = evas_object_above_get(ec->frame);
-   if (o == _comp->layers[e_comp_canvas_layer_map(ec->layer)].obj)
-     {
-        if (_stack)
-          {
-             EINA_LIST_FOREACH(_stack, l, _ec)
-               {
-                  if (_ec == ec) break;
-                  if ((_ec->iconic) || (!_ec->visible)) continue;
+   v1 = _e_mod_effect_visibility_check(ec, _stack_old);
+   v2 = _e_mod_effect_visibility_check(ec, _stack_new);
 
-                  emission = "e,action,restack,show";
-               }
-          }
-        else
-          emission = "e,action,restack,show";
-     }
-   else
+   if (v1 != v2)
      {
-        _ec = evas_object_data_get(o, "E_Client");
-        if ((_ec) && (_ec->layer == ec->layer))
-          {
-             if (_stack)
-               {
-                  EINA_LIST_FOREACH(_stack, l, _ec)
-                    {
-                       if (_ec->layer > ec->layer) continue;
-                       if ((_ec->iconic) || (!_ec->visible)) continue;
-                       if (_ec != ec) break;
-
-                       emission = "e,action,restack,hide";
-                    }
-               }
-             else
-               emission = "e,action,restack,hide";
-          }
+        if (v2) emission = "e,action,restack,show";
+        else emission = "e,action,restack,hide";
      }
 
    return emission;
@@ -95,7 +103,8 @@ _e_mod_effect_cb_client_remove(void *data, int type, void *event)
    E_Event_Client *ev = event;
 
    ec = ev->ec;
-   _stack = eina_list_remove(_stack, ec);
+   _stack_old = eina_list_remove(_stack_saved, ec);
+   _stack_new = eina_list_remove(_stack_new, ec);
 
    return ECORE_CALLBACK_PASS_ON;
 }
@@ -108,11 +117,10 @@ _e_mod_effect_cb_client_restack(void *data, int type, void *event)
    const char* emission = NULL;
 
    ec = ev->ec;
-
+   _e_mod_effect_stack_update();
    if ((emission = _e_mod_effect_restack_effect_check(ec)))
      e_comp_object_signal_emit(ec->frame, emission, "e");
 
-   _e_mod_effect_stack_update();
    return ECORE_CALLBACK_PASS_ON;
 }
 
