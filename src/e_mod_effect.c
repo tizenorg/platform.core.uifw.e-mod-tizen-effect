@@ -103,7 +103,7 @@ _e_mod_effect_cb_client_remove(void *data, int type, void *event)
    E_Event_Client *ev = event;
 
    ec = ev->ec;
-   _stack_old = eina_list_remove(_stack_saved, ec);
+   _stack_old = eina_list_remove(_stack_old, ec);
    _stack_new = eina_list_remove(_stack_new, ec);
 
    return ECORE_CALLBACK_PASS_ON;
