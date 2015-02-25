@@ -12,5 +12,10 @@ collections {
    /* group "e/comp/effects/fade"                         */
    /*-----------------------------------------------------*/
    #include "group/fade.edc"
+
+   /*-----------------------------------------------------*/
+   /* group "e/comp/effects/keyboard"                     */
+   /*-----------------------------------------------------*/
+   #include "group/keyboard.edc"
 }
 

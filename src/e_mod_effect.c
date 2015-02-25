@@ -13,12 +13,19 @@ _e_mod_effect_object_setup(E_Client *ec)
    E_Comp_Config *config;
    config = e_comp_config_get();
 
-   if ((config) && (config->effect_style))
+   if (ec->vkbd.vkbd)
      {
-        e_comp_object_effect_set(ec->frame , config->effect_style);
+        e_comp_object_effect_set(ec->frame, "keyboard");
      }
    else
-     e_comp_object_effect_set(ec->frame, "no-effect");
+     {
+        if ((config) && (config->effect_style))
+          {
+             e_comp_object_effect_set(ec->frame , config->effect_style);
+          }
+        else
+          e_comp_object_effect_set(ec->frame, "no-effect");
+     }
 }
 
 static void
