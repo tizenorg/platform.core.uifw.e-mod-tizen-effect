@@ -1,11 +1,58 @@
 #include "e.h"
 #include "e_mod_effect.h"
 
-E_Comp *_comp = NULL;
-Eina_List *_providers = NULL;
-Eina_List *_event_hdlrs = NULL;
-Eina_List *_stack_old = NULL;
-Eina_List *_stack_new = NULL;
+
+E_Effect *_effect = NULL;
+
+typedef struct _E_Effect_Client
+{
+   E_Client *ec;
+   unsigned int animating;
+} E_Effect_Client;
+
+static void
+_e_mod_effect_ref(E_Client *ec)
+{
+   E_Effect_Client *efc;
+
+   if (!_effect) return;
+
+   if (e_object_is_del(E_OBJECT(ec)))
+     {
+        eina_hash_del_by_key(_effect->clients, &ec);
+        return;
+     }
+
+   efc = eina_hash_find(_effect->clients, &ec);
+   if (!efc) return;
+
+   efc->animating ++;
+   e_object_ref(E_OBJECT(ec));
+   e_pixmap_ref(ec->pixmap);
+}
+
+static void
+_e_mod_effect_unref(E_Client *ec)
+{
+   E_Effect_Client *efc;
+
+   if (!_effect) return;
+
+   efc = eina_hash_find(_effect->clients, &ec);
+   if (!efc) return;
+
+   while(efc->animating)
+     {
+        e_pixmap_free(ec->pixmap);
+        if (!e_object_unref(E_OBJECT(ec)))
+          {
+             eina_hash_del_by_key(_effect->clients, &ec);
+             break;
+          }
+
+        efc->animating --;
+     }
+}
 
 static void
 _e_mod_effect_object_setup(E_Client *ec)
@@ -34,16 +81,19 @@ _e_mod_effect_stack_update()
    E_Client *ec;
    Evas_Object *o;
 
-   _stack_old = eina_list_free(_stack_old);
-   _stack_old = eina_list_clone(_stack_new);
-   for (o = evas_object_top_get(_comp->evas); o; o = evas_object_below_get(o))
+   if (!_effect) return;
+
+   _effect->stack.old = eina_list_free(_effect->stack.old);
+   _effect->stack.old = eina_list_clone(_effect->stack.cur);
+
+   for (o = evas_object_top_get(_effect->comp->evas); o; o = evas_object_below_get(o))
      {
         ec = evas_object_data_get(o, "E_Client");
         if (!ec) continue;
-        if (!e_util_strcmp(evas_object_name_get(o), "layer_obj")) continue;
+        if (e_client_util_ignored_get(ec)) continue;
 
-        _stack_new = eina_list_remove(_stack_new, ec);
-        _stack_new = eina_list_append(_stack_new, ec);
+        _effect->stack.cur = eina_list_remove(_effect->stack.cur, ec);
+        _effect->stack.cur = eina_list_append(_effect->stack.cur, ec);
      }
 }
 
@@ -88,11 +138,12 @@ _e_mod_effect_restack_effect_check(E_Client *ec)
    const char* emission = NULL;
    Eina_Bool v1, v2;
 
+   if (!_effect) return NULL;
    if (!ec->visible) return NULL;
    if (ec->new_client) return NULL;
 
-   v1 = _e_mod_effect_visibility_check(ec, _stack_old);
-   v2 = _e_mod_effect_visibility_check(ec, _stack_new);
+   v1 = _e_mod_effect_visibility_check(ec, _effect->stack.old);
+   v2 = _e_mod_effect_visibility_check(ec, _effect->stack.cur);
 
    if (v1 != v2)
      {
@@ -103,15 +154,168 @@ _e_mod_effect_restack_effect_check(E_Client *ec)
    return emission;
 }
 
+static void
+_e_mod_effect_cb_visible_done(void *data, Evas_Object *obj, const char *sig, const char *src)
+{
+   E_Client *ec;
+   ec = (E_Client*) data;
+
+   _e_mod_effect_unref(ec);
+}
+
+static Eina_Bool
+_e_mod_effect_cb_visible(void *data, Evas_Object *obj, const char *signal)
+{
+   E_Client *ec;
+   ec = e_comp_object_client_get(obj);
+
+   _e_mod_effect_ref(ec);
+   _e_mod_effect_object_setup(ec);
+   e_comp_object_effect_params_set(ec->frame, 0, (int[]){0}, 1);
+   e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_visible_done, ec);
+
+   return EINA_TRUE;
+}
+
+static void
+_e_mod_effect_cb_hidden_done(void *data, Evas_Object *obj, const char *sig, const char *src)
+{
+   E_Client *ec;
+   ec = (E_Client*) data;
+
+   _e_mod_effect_unref(ec);
+
+   if (ec->iconic)
+     evas_object_hide(ec->frame);
+}
+
+static Eina_Bool
+_e_mod_effect_cb_hidden(void *data, Evas_Object *obj, const char *signal)
+{
+   E_Client *ec;
+   ec = e_comp_object_client_get(obj);
+
+   _e_mod_effect_ref(ec);
+
+   _e_mod_effect_object_setup(ec);
+   e_comp_object_effect_params_set(ec->frame, 0, (int[]){1}, 1);
+   e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_hidden_done, ec);
+
+   return EINA_TRUE;
+}
+
+static void
+_e_mod_effect_cb_restack_show_done(void *data, Evas_Object *obj, const char *sig, const char *src)
+{
+   E_Client *ec;
+   ec = (E_Client*)data;
+
+   _e_mod_effect_unref(ec);
+   evas_object_layer_set(ec->frame, ec->layer);
+   ec->layer_block = 0;
+   _e_mod_effect_stack_update();
+}
+
+static void
+_e_mod_effect_cb_restack_hide_done(void *data, Evas_Object *obj, const char *sig, const char *src)
+{
+   E_Client *ec = data;
+   ec = (E_Client*)data;
+
+   _e_mod_effect_unref(ec);
+   evas_object_layer_set(ec->frame, ec->layer);
+   ec->layer_block = 0;
+   _e_mod_effect_stack_update();
+
+   e_comp_object_signal_emit(ec->frame, "e,action,restack,finish", "e");
+}
+
+static void
+_e_mod_effect_cb_restack_finish_done(void *data, Evas_Object *obj, const char *sig, const char *src)
+{
+   E_Client *ec = data;
+   ec = (E_Client*)data;
+
+   _e_mod_effect_unref(ec);
+}
+
+static Eina_Bool
+_e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
+{
+   E_Client *ec;
+   ec = e_comp_object_client_get(obj);
+
+   _e_mod_effect_object_setup(ec);
+   if ((!e_util_strcmp(signal, "e,action,restack,show")))
+     {
+        _e_mod_effect_ref(ec);
+        ec->layer_block = 1;
+        evas_object_layer_set(ec->frame, E_LAYER_CLIENT_PRIO);
+        e_comp_object_effect_params_set(ec->frame, 0, (int[]){2}, 1);
+        e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_restack_show_done, ec);
+     }
+   else if (!e_util_strcmp(signal, "e,action,restack,hide"))
+     {
+        _e_mod_effect_ref(ec);
+        ec->layer_block = 1;
+        evas_object_layer_set(ec->frame, E_LAYER_CLIENT_PRIO);
+        e_comp_object_effect_params_set(ec->frame, 0, (int[]){3}, 1);
+        e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_restack_hide_done, ec);
+     }
+   else if (!e_util_strcmp(signal, "e,action,restack,finish"))
+     {
+        _e_mod_effect_ref(ec);
+        e_comp_object_effect_params_set(ec->frame, 0, (int[]){4}, 1);
+        e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_restack_finish_done, ec);
+     }
+
+   return EINA_TRUE;
+}
+
+
+static E_Effect_Client*
+_e_mod_effect_client_new(E_Client *ec)
+{
+   E_Effect_Client* efc;
+
+   efc = E_NEW(E_Effect_Client, 1);
+   efc->ec = ec;
+   efc->animating = 0;
+
+   return efc;
+}
+
+static Eina_Bool
+_e_mod_effect_cb_client_add(void *data, int type, void *event)
+{
+   E_Client *ec;
+   E_Effect_Client *efc;
+   E_Event_Client *ev = event;
+
+   if (!_effect) return ECORE_CALLBACK_PASS_ON;
+
+   ec = ev->ec;
+   efc = eina_hash_find(_effect->clients, &ec);
+   if (!efc)
+     {
+        efc = _e_mod_effect_client_new(ec);
+        eina_hash_add(_effect->clients, &ec, efc);
+     }
+
+   return ECORE_CALLBACK_PASS_ON;
+}
+
 static Eina_Bool
 _e_mod_effect_cb_client_remove(void *data, int type, void *event)
 {
    E_Client *ec;
    E_Event_Client *ev = event;
 
+   if (!_effect) return ECORE_CALLBACK_PASS_ON;
+
    ec = ev->ec;
-   _stack_old = eina_list_remove(_stack_old, ec);
-   _stack_new = eina_list_remove(_stack_new, ec);
+   _effect->stack.old = eina_list_remove(_effect->stack.old, ec);
+   _effect->stack.cur = eina_list_remove(_effect->stack.cur, ec);
 
    return ECORE_CALLBACK_PASS_ON;
 }
@@ -131,159 +335,98 @@ _e_mod_effect_cb_client_restack(void *data, int type, void *event)
    return ECORE_CALLBACK_PASS_ON;
 }
 
-static Eina_Bool
-_e_mod_effect_cb_visible(void *data, Evas_Object *obj, const char *signal)
-{
-   E_Client *ec;
-
-   ec = e_comp_object_client_get(obj);
-
-   _e_mod_effect_object_setup(ec);
-   e_comp_object_effect_params_set(ec->frame, 0, (int[]){0}, 1);
-   e_comp_object_effect_start(ec->frame, NULL, NULL);
-
-   return EINA_TRUE;
-}
-
 static void
-_e_mod_effect_cb_hidden_done(void *data, Evas_Object *obj, const char *sig, const char *src)
+_e_mod_effect_cb_client_data_free(void *data)
 {
-   E_Client *ec;
-   ec = (E_Client*) data;
-
-   if (ec->iconic)
-     evas_object_hide(ec->frame);
-}
-
-static Eina_Bool
-_e_mod_effect_cb_hidden(void *data, Evas_Object *obj, const char *signal)
-{
-   E_Client *ec;
-
-   ec = e_comp_object_client_get(obj);
-
-   _e_mod_effect_object_setup(ec);
-   e_comp_object_effect_params_set(ec->frame, 0, (int[]){1}, 1);
-   e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_hidden_done, ec);
-
-   return EINA_TRUE;
-}
-
-static void
-_e_mod_effect_cb_restack_show_done(void *data, Evas_Object *obj, const char *sig, const char *src)
-{
-   E_Client *ec;
-
-   ec = (E_Client*)data;
-   evas_object_layer_set(ec->frame, ec->layer);
-   ec->layer_block = 0;
-   _e_mod_effect_stack_update();
-}
-
-static void
-_e_mod_effect_cb_restack_hide_done(void *data, Evas_Object *obj, const char *sig, const char *src)
-{
-   E_Client *ec = data;
-
-   ec = (E_Client*)data;
-   evas_object_layer_set(ec->frame, ec->layer);
-   ec->layer_block = 0;
-   _e_mod_effect_stack_update();
-
-   e_comp_object_signal_emit(ec->frame, "e,action,restack,finish", "e");
-}
-
-static Eina_Bool
-_e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
-{
-   E_Client *ec;
-
-   ec = e_comp_object_client_get(obj);
-   _e_mod_effect_object_setup(ec);
-
-   if ((!e_util_strcmp(signal, "e,action,restack,show")))
-     {
-        ec->layer_block = 1;
-        evas_object_layer_set(ec->frame, E_LAYER_CLIENT_PRIO);
-        e_comp_object_effect_params_set(ec->frame, 0, (int[]){2}, 1);
-        e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_restack_show_done, ec);
-     }
-   else if (!e_util_strcmp(signal, "e,action,restack,hide"))
-     {
-        ec->layer_block = 1;
-        evas_object_layer_set(ec->frame, E_LAYER_CLIENT_PRIO);
-        e_comp_object_effect_params_set(ec->frame, 0, (int[]){3}, 1);
-        e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_restack_hide_done, ec);
-     }
-   else if (!e_util_strcmp(signal, "e,action,restack,finish"))
-     {
-        e_comp_object_effect_params_set(ec->frame, 0, (int[]){4}, 1);
-        e_comp_object_effect_start(ec->frame, NULL, NULL);
-     }
-
-   return EINA_TRUE;
+   free(data);
 }
 
 EAPI Eina_Bool
-e_mod_effect_init()
+e_mod_effect_init(void)
 {
-   if (!(_comp = e_comp_get(NULL)))
-     return EINA_FALSE;
+   E_Comp *comp;
+   E_Effect *effect;
+   E_Comp_Config *config;
 
-   _event_hdlrs =
-      eina_list_append(_event_hdlrs,
-                       ecore_event_handler_add(E_EVENT_CLIENT_STACK,
-                                               _e_mod_effect_cb_client_restack,
-                                               _comp));
-   _event_hdlrs =
-      eina_list_append(_event_hdlrs,
+   if (!(effect = E_NEW(E_Effect, 1))) return EINA_FALSE;
+   if (!(effect->comp = e_comp_get(NULL))) return EINA_FALSE;
+
+   if ((config = e_comp_config_get()))
+     {
+        effect->file = eina_stringshare_add(config->effect_file);
+        effect->style = eina_stringshare_add(config->effect_style);
+     }
+   else
+     {
+        effect->file = "";
+        effect->style = "no-effect";
+     }
+
+   effect->clients = eina_hash_pointer_new(_e_mod_effect_cb_client_data_free);
+
+   effect->event_hdlrs =
+      eina_list_append(effect->event_hdlrs,
+                       ecore_event_handler_add(E_EVENT_CLIENT_ADD,
+                                               _e_mod_effect_cb_client_add,
+                                               effect));
+   effect->event_hdlrs =
+      eina_list_append(effect->event_hdlrs,
                        ecore_event_handler_add(E_EVENT_CLIENT_REMOVE,
                                                _e_mod_effect_cb_client_remove,
-                                               _comp));
-   _providers =
-      eina_list_append(_providers,
+                                               effect));
+   effect->event_hdlrs =
+      eina_list_append(effect->event_hdlrs,
+                       ecore_event_handler_add(E_EVENT_CLIENT_STACK,
+                                               _e_mod_effect_cb_client_restack,
+                                               effect));
+   effect->providers =
+      eina_list_append(effect->providers,
                        e_comp_object_effect_mover_add(100,
                                                       "e,state,visible",
                                                       _e_mod_effect_cb_visible,
-                                                      _comp));
-   _providers =
-      eina_list_append(_providers,
+                                                      effect));
+   effect->providers =
+      eina_list_append(effect->providers,
                        e_comp_object_effect_mover_add(100,
                                                       "e,state,hidden",
                                                       _e_mod_effect_cb_hidden,
-                                                      _comp));
-   _providers =
-      eina_list_append(_providers,
+                                                      effect));
+   effect->providers =
+      eina_list_append(effect->providers,
                        e_comp_object_effect_mover_add(100,
                                                       "e,action,iconify",
                                                       _e_mod_effect_cb_hidden,
-                                                      _comp));
-   _providers =
-      eina_list_append(_providers,
+                                                      effect));
+   effect->providers =
+      eina_list_append(effect->providers,
                        e_comp_object_effect_mover_add(100,
                                                       "e,action,uniconify",
                                                       _e_mod_effect_cb_visible,
-                                                      _comp));
-   _providers =
-      eina_list_append(_providers,
+                                                      effect));
+   effect->providers =
+      eina_list_append(effect->providers,
                        e_comp_object_effect_mover_add(100,
                                                       "e,action,restack*",
                                                       _e_mod_effect_cb_restack,
-                                                      _comp));
+                                                      effect));
+
+   _effect = effect;
+
    return EINA_TRUE;
 }
 
 EAPI void
 e_mod_effect_shutdown()
 {
-   E_Comp_Object_Mover *prov = NULL;
-   Ecore_Event_Handler *hdl = NULL;
+   if (!_effect) return;
 
-   EINA_LIST_FREE(_providers, prov)
-      e_comp_object_effect_mover_del(prov);
+   E_FREE_FUNC(_effect->clients, eina_hash_free);
 
-   EINA_LIST_FREE(_event_hdlrs, hdl)
-      ecore_event_handler_del(hdl);
+   E_FREE_LIST(_effect->providers,  e_comp_object_effect_mover_del);
+   E_FREE_LIST(_effect->event_hdlrs, ecore_event_handler_del);
 
-   _comp = NULL;
+   E_FREE_FUNC(_effect->stack.old, eina_list_free);
+   E_FREE_FUNC(_effect->stack.cur, eina_list_free);
+
+   E_FREE(_effect);
 }
