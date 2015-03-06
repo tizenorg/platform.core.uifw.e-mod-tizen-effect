@@ -1,7 +1,6 @@
 #include "e.h"
 #include "e_mod_effect.h"
 
-E_Comp *_comp = NULL;
 Eina_List *_providers = NULL;
 Eina_List *_event_hdlrs = NULL;
 Eina_List *_stack_old = NULL;
@@ -29,7 +28,7 @@ _e_mod_effect_stack_update()
 
    _stack_old = eina_list_free(_stack_old);
    _stack_old = eina_list_clone(_stack_new);
-   for (o = evas_object_top_get(_comp->evas); o; o = evas_object_below_get(o))
+   for (o = evas_object_top_get(e_comp->evas); o; o = evas_object_below_get(o))
      {
         ec = evas_object_data_get(o, "E_Client");
         if (!ec) continue;
@@ -220,49 +219,49 @@ _e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
 EAPI Eina_Bool
 e_mod_effect_init()
 {
-   if (!(_comp = e_comp_get(NULL)))
+   if (!e_comp)
      return EINA_FALSE;
 
    _event_hdlrs =
       eina_list_append(_event_hdlrs,
                        ecore_event_handler_add(E_EVENT_CLIENT_STACK,
                                                _e_mod_effect_cb_client_restack,
-                                               _comp));
+                                               e_comp));
    _event_hdlrs =
       eina_list_append(_event_hdlrs,
                        ecore_event_handler_add(E_EVENT_CLIENT_REMOVE,
                                                _e_mod_effect_cb_client_remove,
-                                               _comp));
+                                               e_comp));
    _providers =
       eina_list_append(_providers,
                        e_comp_object_effect_mover_add(100,
                                                       "e,state,visible",
                                                       _e_mod_effect_cb_visible,
-                                                      _comp));
+                                                      e_comp));
    _providers =
       eina_list_append(_providers,
                        e_comp_object_effect_mover_add(100,
                                                       "e,state,hidden",
                                                       _e_mod_effect_cb_hidden,
-                                                      _comp));
+                                                      e_comp));
    _providers =
       eina_list_append(_providers,
                        e_comp_object_effect_mover_add(100,
                                                       "e,action,iconify",
                                                       _e_mod_effect_cb_hidden,
-                                                      _comp));
+                                                      e_comp));
    _providers =
       eina_list_append(_providers,
                        e_comp_object_effect_mover_add(100,
                                                       "e,action,uniconify",
                                                       _e_mod_effect_cb_visible,
-                                                      _comp));
+                                                      e_comp));
    _providers =
       eina_list_append(_providers,
                        e_comp_object_effect_mover_add(100,
                                                       "e,action,restack*",
                                                       _e_mod_effect_cb_restack,
-                                                      _comp));
+                                                      e_comp));
    return EINA_TRUE;
 }
 
@@ -277,6 +276,4 @@ e_mod_effect_shutdown()
 
    EINA_LIST_FREE(_event_hdlrs, hdl)
       ecore_event_handler_del(hdl);
-
-   _comp = NULL;
 }
