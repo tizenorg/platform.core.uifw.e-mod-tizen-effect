@@ -8,6 +8,7 @@ typedef struct _E_Effect_Client
 {
    E_Client *ec;
    unsigned int animating;
+   E_Pixmap *ep;
 } E_Effect_Client;
 
 static void
@@ -28,7 +29,7 @@ _e_mod_effect_ref(E_Client *ec)
 
    efc->animating ++;
    e_object_ref(E_OBJECT(ec));
-   e_pixmap_ref(ec->pixmap);
+   efc->ep = e_pixmap_ref(ec->pixmap);
 }
 
 static void
@@ -43,7 +44,7 @@ _e_mod_effect_unref(E_Client *ec)
 
    while(efc->animating)
      {
-        e_pixmap_free(ec->pixmap);
+        e_pixmap_free(efc->ep);
         if (!e_object_unref(E_OBJECT(ec)))
           {
              eina_hash_del_by_key(_effect->clients, &ec);
@@ -52,6 +53,8 @@ _e_mod_effect_unref(E_Client *ec)
 
         efc->animating --;
      }
+
+   efc->ep = NULL;
 }
 
 static void
@@ -281,6 +284,7 @@ _e_mod_effect_client_new(E_Client *ec)
    efc = E_NEW(E_Effect_Client, 1);
    efc->ec = ec;
    efc->animating = 0;
+   efc->ep = NULL;
 
    return efc;
 }
