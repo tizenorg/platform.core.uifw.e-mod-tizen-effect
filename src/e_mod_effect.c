@@ -47,6 +47,7 @@ _e_mod_effect_unref(E_Client *ec)
         e_pixmap_free(efc->ep);
         if (!e_object_unref(E_OBJECT(ec)))
           {
+             efc = NULL;
              eina_hash_del_by_key(_effect->clients, &ec);
              break;
           }
@@ -54,7 +55,8 @@ _e_mod_effect_unref(E_Client *ec)
         efc->animating --;
      }
 
-   efc->ep = NULL;
+   if (efc)
+     efc->ep = NULL;
 }
 
 static void
@@ -89,7 +91,7 @@ _e_mod_effect_stack_update()
    _effect->stack.old = eina_list_free(_effect->stack.old);
    _effect->stack.old = eina_list_clone(_effect->stack.cur);
 
-   for (o = evas_object_top_get(_effect->comp->evas); o; o = evas_object_below_get(o))
+   for (o = evas_object_top_get(e_comp->evas); o; o = evas_object_below_get(o))
      {
         ec = evas_object_data_get(o, "E_Client");
         if (!ec) continue;
@@ -348,12 +350,11 @@ _e_mod_effect_cb_client_data_free(void *data)
 EAPI Eina_Bool
 e_mod_effect_init(void)
 {
-   E_Comp *comp;
    E_Effect *effect;
    E_Comp_Config *config;
 
+   if (!e_comp) return EINA_FALSE;
    if (!(effect = E_NEW(E_Effect, 1))) return EINA_FALSE;
-   if (!(effect->comp = e_comp_get(NULL))) return EINA_FALSE;
 
    if ((config = e_comp_config_get()))
      {
