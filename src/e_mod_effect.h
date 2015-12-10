@@ -5,8 +5,6 @@ typedef struct _E_Effect E_Effect;
 
 struct _E_Effect
 {
-   E_Comp *comp;
-
    const char *file;
    const char *style;
 
