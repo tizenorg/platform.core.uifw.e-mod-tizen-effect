@@ -1,4 +1,5 @@
 %bcond_with x
+%bcond_with wayland
 
 Name: e-mod-tizen-effect
 Version: 0.0.2
@@ -15,9 +16,11 @@ BuildRequires: pkgconfig(edje)
 BuildRequires:  gettext
 BuildRequires:  edje-tools
 
+## for wayland build plz remove below lines
 %if !%{with x}
 ExclusiveArch:
 %endif
+###
 
 %description
 This package provides various window effect(animation)
@@ -33,7 +36,11 @@ export CFLAGS+=" -Wall -g -fPIC -rdynamic ${GC_SECTIONS_FLAGS}"
 export LDFLAGS+=" -Wl,--hash-style=both -Wl,--as-needed -Wl,--rpath=/usr/lib"
 
 %autogen
-%configure --prefix=/usr
+%configure \
+%if %{with wayland}
+      --enable-wayland-only \
+%endif
+      --prefix=/usr
 make
 
 %install

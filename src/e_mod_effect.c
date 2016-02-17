@@ -1,3 +1,6 @@
+#ifdef HAVE_WAYLAND
+ #define E_COMP_WL
+#endif
 #include "e.h"
 #include "e_mod_effect.h"
 
@@ -8,8 +11,39 @@ typedef struct _E_Effect_Client
 {
    E_Client *ec;
    unsigned int animating;
+#ifdef HAVE_WAYLAND
+   E_Comp_Wl_Buffer_Ref buffer_ref;
+#else
    E_Pixmap *ep;
+#endif
 } E_Effect_Client;
+
+static E_Effect_Client*
+_e_mod_effect_client_new(E_Client *ec)
+{
+   E_Effect_Client* efc;
+
+   efc = E_NEW(E_Effect_Client, 1);
+   efc->ec = ec;
+   efc->animating = 0;
+#ifndef HAVE_WAYLAND
+   efc->ep = NULL;
+#endif
+
+   return efc;
+}
+
+static E_Effect_Client *
+_e_mod_effect_client_get(E_Client *ec)
+{
+   E_Effect_Client *efc;
+
+   if (!_effect) return NULL;
+
+   efc = eina_hash_find(_effect->clients, &ec);
+
+   return efc;
+}
 
 static void
 _e_mod_effect_ref(E_Client *ec)
@@ -24,12 +58,14 @@ _e_mod_effect_ref(E_Client *ec)
         return;
      }
 
-   efc = eina_hash_find(_effect->clients, &ec);
+   efc = _e_mod_effect_client_get(ec);
    if (!efc) return;
 
    efc->animating ++;
    e_object_ref(E_OBJECT(ec));
+#ifndef HAVE_WAYLAND
    efc->ep = e_pixmap_ref(ec->pixmap);
+#endif
 }
 
 static void
@@ -39,14 +75,17 @@ _e_mod_effect_unref(E_Client *ec)
 
    if (!_effect) return;
 
-   efc = eina_hash_find(_effect->clients, &ec);
+   efc = _e_mod_effect_client_get(ec);
    if (!efc) return;
 
    while(efc->animating)
      {
+#ifndef HAVE_WAYLAND
         e_pixmap_free(efc->ep);
+#endif
         if (!e_object_unref(E_OBJECT(ec)))
           {
+             efc = NULL;
              eina_hash_del_by_key(_effect->clients, &ec);
              break;
           }
@@ -54,7 +93,10 @@ _e_mod_effect_unref(E_Client *ec)
         efc->animating --;
      }
 
-   efc->ep = NULL;
+#ifndef HAVE_WAYLAND
+   if (efc)
+     efc->ep = NULL;
+#endif
 }
 
 static void
@@ -89,7 +131,7 @@ _e_mod_effect_stack_update()
    _effect->stack.old = eina_list_free(_effect->stack.old);
    _effect->stack.old = eina_list_clone(_effect->stack.cur);
 
-   for (o = evas_object_top_get(_effect->comp->evas); o; o = evas_object_below_get(o))
+   for (o = evas_object_top_get(e_comp->evas); o; o = evas_object_below_get(o))
      {
         ec = evas_object_data_get(o, "E_Client");
         if (!ec) continue;
@@ -188,7 +230,7 @@ _e_mod_effect_cb_hidden_done(void *data, Evas_Object *obj, const char *sig, cons
 
    _e_mod_effect_unref(ec);
 
-   if (ec->iconic)
+   if (_e_mod_effect_client_get(ec))
      evas_object_hide(ec->frame);
 }
 
@@ -275,20 +317,6 @@ _e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
    return EINA_TRUE;
 }
 
-
-static E_Effect_Client*
-_e_mod_effect_client_new(E_Client *ec)
-{
-   E_Effect_Client* efc;
-
-   efc = E_NEW(E_Effect_Client, 1);
-   efc->ec = ec;
-   efc->animating = 0;
-   efc->ep = NULL;
-
-   return efc;
-}
-
 static Eina_Bool
 _e_mod_effect_cb_client_add(void *data, int type, void *event)
 {
@@ -299,11 +327,12 @@ _e_mod_effect_cb_client_add(void *data, int type, void *event)
    if (!_effect) return ECORE_CALLBACK_PASS_ON;
 
    ec = ev->ec;
-   efc = eina_hash_find(_effect->clients, &ec);
+   efc = _e_mod_effect_client_get(ec);
    if (!efc)
      {
         efc = _e_mod_effect_client_new(ec);
-        eina_hash_add(_effect->clients, &ec, efc);
+        if (efc)
+          eina_hash_add(_effect->clients, &ec, efc);
      }
 
    return ECORE_CALLBACK_PASS_ON;
@@ -313,6 +342,7 @@ static Eina_Bool
 _e_mod_effect_cb_client_remove(void *data, int type, void *event)
 {
    E_Client *ec;
+   E_Effect_Client *efc = NULL;
    E_Event_Client *ev = event;
 
    if (!_effect) return ECORE_CALLBACK_PASS_ON;
@@ -320,6 +350,12 @@ _e_mod_effect_cb_client_remove(void *data, int type, void *event)
    ec = ev->ec;
    _effect->stack.old = eina_list_remove(_effect->stack.old, ec);
    _effect->stack.cur = eina_list_remove(_effect->stack.cur, ec);
+
+   if ((efc = _e_mod_effect_client_get(ec)))
+     {
+        if (!efc->animating)
+          eina_hash_del_by_key(_effect->clients, &ec);
+     }
 
    return ECORE_CALLBACK_PASS_ON;
 }
@@ -339,21 +375,56 @@ _e_mod_effect_cb_client_restack(void *data, int type, void *event)
    return ECORE_CALLBACK_PASS_ON;
 }
 
+#ifdef HAVE_WAYLAND
+static Eina_Bool
+_e_mod_effect_cb_client_buffer_change(void *data, int ev_type, void *event)
+{
+   E_Event_Client *ev = event;
+   E_Client *ec;
+   E_Effect_Client *efc;
+   E_Comp_Wl_Buffer *buffer = NULL;
+
+   ec = ev->ec;
+   if (!ec) return ECORE_CALLBACK_PASS_ON;
+
+   efc = _e_mod_effect_client_get(ec);
+   if (!efc) return NULL;
+
+   if (ec->pixmap)
+     {
+        buffer = e_pixmap_resource_get(ec->pixmap);
+
+        if ((buffer) && (buffer != efc->buffer_ref.buffer))
+          {
+             e_comp_wl_buffer_reference(&efc->buffer_ref, buffer);
+          }
+     }
+
+   return ECORE_CALLBACK_PASS_ON;
+}
+
+#endif
 static void
 _e_mod_effect_cb_client_data_free(void *data)
 {
+#ifdef HAVE_WAYLAND
+   E_Effect_Client *efc = data;
+
+   if (efc->buffer_ref.buffer)
+     e_comp_wl_buffer_reference(&efc->buffer_ref, NULL);
+
+#endif
    free(data);
 }
 
 EAPI Eina_Bool
 e_mod_effect_init(void)
 {
-   E_Comp *comp;
    E_Effect *effect;
    E_Comp_Config *config;
 
+   if (!e_comp) return EINA_FALSE;
    if (!(effect = E_NEW(E_Effect, 1))) return EINA_FALSE;
-   if (!(effect->comp = e_comp_get(NULL))) return EINA_FALSE;
 
    if ((config = e_comp_config_get()))
      {
@@ -368,21 +439,20 @@ e_mod_effect_init(void)
 
    effect->clients = eina_hash_pointer_new(_e_mod_effect_cb_client_data_free);
 
-   effect->event_hdlrs =
-      eina_list_append(effect->event_hdlrs,
-                       ecore_event_handler_add(E_EVENT_CLIENT_ADD,
-                                               _e_mod_effect_cb_client_add,
-                                               effect));
-   effect->event_hdlrs =
-      eina_list_append(effect->event_hdlrs,
-                       ecore_event_handler_add(E_EVENT_CLIENT_REMOVE,
-                                               _e_mod_effect_cb_client_remove,
-                                               effect));
-   effect->event_hdlrs =
-      eina_list_append(effect->event_hdlrs,
-                       ecore_event_handler_add(E_EVENT_CLIENT_STACK,
-                                               _e_mod_effect_cb_client_restack,
-                                               effect));
+   E_LIST_HANDLER_APPEND(effect->event_hdlrs, E_EVENT_CLIENT_ADD,
+                         _e_mod_effect_cb_client_add, effect);
+
+   E_LIST_HANDLER_APPEND(effect->event_hdlrs, E_EVENT_CLIENT_REMOVE,
+                         _e_mod_effect_cb_client_remove, effect);
+
+   E_LIST_HANDLER_APPEND(effect->event_hdlrs, E_EVENT_CLIENT_STACK,
+                         _e_mod_effect_cb_client_restack, effect);
+
+#ifdef HAVE_WAYLAND
+   E_LIST_HANDLER_APPEND(effect->event_hdlrs, E_EVENT_CLIENT_BUFFER_CHANGE,
+                         _e_mod_effect_cb_client_buffer_change, effect);
+#endif
+
    effect->providers =
       eina_list_append(effect->providers,
                        e_comp_object_effect_mover_add(100,
