@@ -1,11 +1,6 @@
-#ifdef HAVE_WAYLAND
- #define E_COMP_WL
-#endif
-#include "e.h"
 #include "e_mod_effect.h"
 
-
-E_Effect *_effect = NULL;
+static E_Effect *_effect = NULL;
 
 typedef struct _E_Effect_Client
 {
@@ -17,6 +12,55 @@ typedef struct _E_Effect_Client
    E_Pixmap *ep;
 #endif
 } E_Effect_Client;
+
+static void
+_e_mod_effect_event_send(E_Client *ec, Eina_Bool start, E_Effect_Type type)
+{
+#ifdef HAVE_WAYLAND
+   struct wl_resource *surface_resource;
+   struct wl_resource *effect_resource;
+   struct wl_client *wc;
+   unsigned int tizen_effect_type = TIZEN_EFFECT_TYPE_NONE;
+
+   if (!_effect) return;
+   if ((!ec) || (!ec->comp_data)) return;
+   if (e_object_is_del(E_OBJECT(ec))) return;
+
+   surface_resource = ec->comp_data->surface;
+   if (!surface_resource) return;
+
+   wc = wl_resource_get_client(surface_resource);
+   if (!wc) return;
+
+   effect_resource = eina_hash_find(_effect->resources, &wc);
+   if (!effect_resource) return;
+
+   switch(type)
+     {
+      case E_EFFECT_TYPE_SHOW:
+         tizen_effect_type = TIZEN_EFFECT_TYPE_SHOW;
+         break;
+      case E_EFFECT_TYPE_HIDE:
+         tizen_effect_type = TIZEN_EFFECT_TYPE_HIDE;
+         break;
+      case E_EFFECT_TYPE_RESTACK_SHOW:
+      case E_EFFECT_TYPE_RESTACK_HIDE:
+         tizen_effect_type = TIZEN_EFFECT_TYPE_RESTACK;
+         break;
+      default:
+         return;
+     }
+
+   if (start)
+     tizen_effect_send_start(effect_resource, surface_resource, tizen_effect_type);
+   else
+     tizen_effect_send_end(effect_resource, surface_resource, tizen_effect_type);
+#else
+   (void)ec;
+   (void)start;
+   (void)type;
+#endif
+}
 
 static E_Effect_Client*
 _e_mod_effect_client_new(E_Client *ec)
@@ -205,6 +249,7 @@ _e_mod_effect_cb_visible_done(void *data, Evas_Object *obj, const char *sig, con
    E_Client *ec;
    ec = (E_Client*) data;
 
+   _e_mod_effect_event_send(ec, EINA_FALSE, E_EFFECT_TYPE_SHOW);
    _e_mod_effect_unref(ec);
 }
 
@@ -217,6 +262,8 @@ _e_mod_effect_cb_visible(void *data, Evas_Object *obj, const char *signal)
    _e_mod_effect_ref(ec);
    _e_mod_effect_object_setup(ec);
    e_comp_object_effect_params_set(ec->frame, 0, (int[]){0}, 1);
+
+   _e_mod_effect_event_send(ec, EINA_TRUE, E_EFFECT_TYPE_SHOW);
    e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_visible_done, ec);
 
    return EINA_TRUE;
@@ -228,6 +275,7 @@ _e_mod_effect_cb_hidden_done(void *data, Evas_Object *obj, const char *sig, cons
    E_Client *ec;
    ec = (E_Client*) data;
 
+   _e_mod_effect_event_send(ec, EINA_FALSE, E_EFFECT_TYPE_HIDE);
    _e_mod_effect_unref(ec);
 
    if (_e_mod_effect_client_get(ec))
@@ -244,6 +292,8 @@ _e_mod_effect_cb_hidden(void *data, Evas_Object *obj, const char *signal)
 
    _e_mod_effect_object_setup(ec);
    e_comp_object_effect_params_set(ec->frame, 0, (int[]){1}, 1);
+
+   _e_mod_effect_event_send(ec, EINA_TRUE, E_EFFECT_TYPE_HIDE);
    e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_hidden_done, ec);
 
    return EINA_TRUE;
@@ -281,6 +331,7 @@ _e_mod_effect_cb_restack_finish_done(void *data, Evas_Object *obj, const char *s
    E_Client *ec = data;
    ec = (E_Client*)data;
 
+   _e_mod_effect_event_send(ec, EINA_FALSE, E_EFFECT_TYPE_RESTACK_SHOW);
    _e_mod_effect_unref(ec);
 }
 
@@ -297,6 +348,8 @@ _e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
         ec->layer_block = 1;
         evas_object_layer_set(ec->frame, E_LAYER_CLIENT_PRIO);
         e_comp_object_effect_params_set(ec->frame, 0, (int[]){2}, 1);
+
+        _e_mod_effect_event_send(ec, EINA_TRUE, E_EFFECT_TYPE_RESTACK_SHOW);
         e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_restack_show_done, ec);
      }
    else if (!e_util_strcmp(signal, "e,action,restack,hide"))
@@ -305,6 +358,8 @@ _e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
         ec->layer_block = 1;
         evas_object_layer_set(ec->frame, E_LAYER_CLIENT_PRIO);
         e_comp_object_effect_params_set(ec->frame, 0, (int[]){3}, 1);
+
+        _e_mod_effect_event_send(ec, EINA_TRUE, E_EFFECT_TYPE_RESTACK_HIDE);
         e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_restack_hide_done, ec);
      }
    else if (!e_util_strcmp(signal, "e,action,restack,finish"))
@@ -388,7 +443,7 @@ _e_mod_effect_cb_client_buffer_change(void *data, int ev_type, void *event)
    if (!ec) return ECORE_CALLBACK_PASS_ON;
 
    efc = _e_mod_effect_client_get(ec);
-   if (!efc) return NULL;
+   if (!efc) return ECORE_CALLBACK_PASS_ON;
 
    if (ec->pixmap)
      {
@@ -403,6 +458,44 @@ _e_mod_effect_cb_client_buffer_change(void *data, int ev_type, void *event)
    return ECORE_CALLBACK_PASS_ON;
 }
 
+static void
+_tz_effect_cb_destroy(struct wl_client *client EINA_UNUSED, struct wl_resource *tizen_effect_resource)
+{
+   wl_resource_destroy(tizen_effect_resource);
+}
+
+static const struct tizen_effect_interface _tz_effect_interface =
+{
+   _tz_effect_cb_destroy,
+};
+
+static void
+_tz_effect_cb_effect_destroy(struct wl_resource *tizen_effect_resource)
+{
+   if ((!_effect) || (!_effect->resources)) return;
+
+   eina_hash_del_by_data(_effect->resources, tizen_effect_resource);
+}
+
+static void
+_e_mod_effect_cb_bind(struct wl_client *client, void *data EINA_UNUSED, uint32_t version EINA_UNUSED, uint32_t id)
+{
+   struct wl_resource *res;
+
+   if (!(res = wl_resource_create(client, &tizen_effect_interface, 1, id)))
+     {
+        ERR("Could not create tizen_effect interface");
+        wl_client_post_no_memory(client);
+        return;
+     }
+
+   wl_resource_set_implementation(res,
+                                  &_tz_effect_interface,
+                                  NULL,
+                                  _tz_effect_cb_effect_destroy);
+
+   eina_hash_add(_effect->resources, &client, res);
+}
 #endif
 static void
 _e_mod_effect_cb_client_data_free(void *data)
@@ -423,8 +516,13 @@ e_mod_effect_init(void)
    E_Effect *effect;
    E_Comp_Config *config;
 
-   if (!e_comp) return EINA_FALSE;
-   if (!(effect = E_NEW(E_Effect, 1))) return EINA_FALSE;
+   EINA_SAFETY_ON_NULL_RETURN_VAL(e_comp, EINA_FALSE);
+   EINA_SAFETY_ON_NULL_RETURN_VAL(e_comp->evas, EINA_FALSE);
+
+   effect = E_NEW(E_Effect, 1);
+   EINA_SAFETY_ON_NULL_RETURN_VAL(effect, EINA_FALSE);
+
+   _effect = effect;
 
    if ((config = e_comp_config_get()))
      {
@@ -438,7 +536,22 @@ e_mod_effect_init(void)
      }
 
    effect->clients = eina_hash_pointer_new(_e_mod_effect_cb_client_data_free);
+   EINA_SAFETY_ON_NULL_GOTO(effect->clients, err);
 
+#ifdef HAVE_WAYLAND
+   effect->resources = eina_hash_pointer_new(NULL);
+   EINA_SAFETY_ON_NULL_GOTO(effect->resources, err);
+
+   effect->global = wl_global_create(e_comp_wl->wl.disp, &tizen_effect_interface, 1, effect, _e_mod_effect_cb_bind);
+   if (!effect->global)
+     {
+        ERR("Could not add tizen_efffect wayland globals: %m");
+        goto err;
+     }
+
+   E_LIST_HANDLER_APPEND(effect->event_hdlrs, E_EVENT_CLIENT_BUFFER_CHANGE,
+                         _e_mod_effect_cb_client_buffer_change, effect);
+#endif
    E_LIST_HANDLER_APPEND(effect->event_hdlrs, E_EVENT_CLIENT_ADD,
                          _e_mod_effect_cb_client_add, effect);
 
@@ -447,11 +560,6 @@ e_mod_effect_init(void)
 
    E_LIST_HANDLER_APPEND(effect->event_hdlrs, E_EVENT_CLIENT_STACK,
                          _e_mod_effect_cb_client_restack, effect);
-
-#ifdef HAVE_WAYLAND
-   E_LIST_HANDLER_APPEND(effect->event_hdlrs, E_EVENT_CLIENT_BUFFER_CHANGE,
-                         _e_mod_effect_cb_client_buffer_change, effect);
-#endif
 
    effect->providers =
       eina_list_append(effect->providers,
@@ -487,6 +595,10 @@ e_mod_effect_init(void)
    _effect = effect;
 
    return EINA_TRUE;
+
+err:
+   e_mod_effect_shutdown();
+   return EINA_FALSE;
 }
 
 EAPI void
@@ -494,13 +606,19 @@ e_mod_effect_shutdown()
 {
    if (!_effect) return;
 
-   E_FREE_FUNC(_effect->clients, eina_hash_free);
+   E_FREE_FUNC(_effect->stack.old, eina_list_free);
+   E_FREE_FUNC(_effect->stack.cur, eina_list_free);
 
    E_FREE_LIST(_effect->providers,  e_comp_object_effect_mover_del);
    E_FREE_LIST(_effect->event_hdlrs, ecore_event_handler_del);
 
-   E_FREE_FUNC(_effect->stack.old, eina_list_free);
-   E_FREE_FUNC(_effect->stack.cur, eina_list_free);
+#ifdef HAVE_WAYLAND
+   if (_effect->global)
+     wl_global_destroy(_effect->global);
+
+   E_FREE_FUNC(_effect->resources, eina_hash_free);
+#endif
+   E_FREE_FUNC(_effect->clients, eina_hash_free);
 
    E_FREE(_effect);
 }
