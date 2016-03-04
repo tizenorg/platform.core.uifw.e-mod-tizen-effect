@@ -15,6 +15,10 @@ BuildRequires: pkgconfig(ecore)
 BuildRequires: pkgconfig(edje)
 BuildRequires:  gettext
 BuildRequires:  edje-tools
+%if %{with wayland}
+BuildRequires:  pkgconfig(wayland-server)
+BuildRequires:  pkgconfig(tizen-extension-server)
+%endif
 
 ## for wayland build plz remove below lines
 %if !%{with x}
