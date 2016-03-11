@@ -22,6 +22,8 @@ ExclusiveArch:
 %endif
 ###
 
+%global TZ_SYS_RO_SHARE  %{?TZ_SYS_RO_SHARE:%TZ_SYS_RO_SHARE}%{!?TZ_SYS_RO_SHARE:/usr/share}
+
 %description
 This package provides various window effect(animation)
 as one module of enlightenment.
@@ -40,15 +42,15 @@ export LDFLAGS+=" -Wl,--hash-style=both -Wl,--as-needed -Wl,--rpath=/usr/lib"
 %if %{with wayland}
       --enable-wayland-only \
 %endif
-      --prefix=/usr
+      --prefix=%{_prefix}
 make
 
 %install
 rm -rf %{buildroot}
 
 # for license notification
-mkdir -p %{buildroot}/usr/share/license
-cp -a %{_builddir}/%{buildsubdir}/COPYING %{buildroot}/usr/share/license/%{name}
+mkdir -p %{buildroot}/%{TZ_SYS_RO_SHARE}/license
+cp -a %{_builddir}/%{buildsubdir}/COPYING %{buildroot}/%{TZ_SYS_RO_SHARE}/license/%{name}
 
 # install
 make install DESTDIR=%{buildroot}
@@ -61,5 +63,5 @@ find  %{buildroot}%{_libdir}/enlightenment/modules/%{name} -name *.la | xargs rm
 %defattr(-,root,root,-)
 %{_libdir}/enlightenment/modules/e-mod-tizen-effect
 %{_datadir}/enlightenment/data/themes
-/usr/share/license/%{name}
+%{TZ_SYS_RO_SHARE}/license/%{name}
 
