@@ -3,10 +3,8 @@
 
 # include "config.h"
 
-# ifdef HAVE_WAYLAND
-#  define E_COMP_WL
-#  include <tizen-extension-server-protocol.h>
-# endif
+# define E_COMP_WL
+# include <tizen-extension-server-protocol.h>
 
 # include <e.h>
 
@@ -26,10 +24,8 @@ enum _E_Effect_Type
 
 struct _E_Effect
 {
-# ifdef HAVE_WAYLAND
    struct wl_global *global;
    Eina_Hash *resources;
-# endif
    const char *file;
    const char *style;
 

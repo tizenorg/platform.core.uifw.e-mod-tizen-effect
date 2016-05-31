@@ -1,6 +1,3 @@
-%bcond_with x
-%bcond_with wayland
-
 Name: e-mod-tizen-effect
 Version: 0.0.3
 Release: 1
@@ -15,16 +12,8 @@ BuildRequires: pkgconfig(ecore)
 BuildRequires: pkgconfig(edje)
 BuildRequires:  gettext
 BuildRequires:  edje-tools
-%if %{with wayland}
 BuildRequires:  pkgconfig(wayland-server)
 BuildRequires:  pkgconfig(tizen-extension-server)
-%endif
-
-## for wayland build plz remove below lines
-%if !%{with x}
-ExclusiveArch:
-%endif
-###
 
 %global TZ_SYS_RO_SHARE  %{?TZ_SYS_RO_SHARE:%TZ_SYS_RO_SHARE}%{!?TZ_SYS_RO_SHARE:/usr/share}
 
@@ -42,11 +31,7 @@ export CFLAGS+=" -Wall -g -fPIC -rdynamic ${GC_SECTIONS_FLAGS}"
 export LDFLAGS+=" -Wl,--hash-style=both -Wl,--as-needed -Wl,--rpath=/usr/lib"
 
 %autogen
-%configure \
-%if %{with wayland}
-      --enable-wayland-only \
-%endif
-      --prefix=%{_prefix}
+%configure --prefix=%{_prefix}
 make
 
 %install
