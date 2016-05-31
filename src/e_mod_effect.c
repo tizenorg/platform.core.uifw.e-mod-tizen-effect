@@ -6,17 +6,12 @@ typedef struct _E_Effect_Client
 {
    E_Client *ec;
    unsigned int animating;
-#ifdef HAVE_WAYLAND
    E_Comp_Wl_Buffer_Ref buffer_ref;
-#else
-   E_Pixmap *ep;
-#endif
 } E_Effect_Client;
 
 static void
 _e_mod_effect_event_send(E_Client *ec, Eina_Bool start, E_Effect_Type type)
 {
-#ifdef HAVE_WAYLAND
    struct wl_resource *surface_resource;
    struct wl_resource *effect_resource;
    struct wl_client *wc;
@@ -55,11 +50,6 @@ _e_mod_effect_event_send(E_Client *ec, Eina_Bool start, E_Effect_Type type)
      tizen_effect_send_start(effect_resource, surface_resource, tizen_effect_type);
    else
      tizen_effect_send_end(effect_resource, surface_resource, tizen_effect_type);
-#else
-   (void)ec;
-   (void)start;
-   (void)type;
-#endif
 }
 
 static E_Effect_Client*
@@ -70,9 +60,6 @@ _e_mod_effect_client_new(E_Client *ec)
    efc = E_NEW(E_Effect_Client, 1);
    efc->ec = ec;
    efc->animating = 0;
-#ifndef HAVE_WAYLAND
-   efc->ep = NULL;
-#endif
 
    return efc;
 }
@@ -107,9 +94,6 @@ _e_mod_effect_ref(E_Client *ec)
 
    efc->animating ++;
    e_object_ref(E_OBJECT(ec));
-#ifndef HAVE_WAYLAND
-   efc->ep = e_pixmap_ref(ec->pixmap);
-#endif
 }
 
 static void
@@ -124,9 +108,6 @@ _e_mod_effect_unref(E_Client *ec)
 
    while(efc->animating)
      {
-#ifndef HAVE_WAYLAND
-        e_pixmap_free(efc->ep);
-#endif
         if (!e_object_unref(E_OBJECT(ec)))
           {
              efc = NULL;
@@ -136,11 +117,6 @@ _e_mod_effect_unref(E_Client *ec)
 
         efc->animating --;
      }
-
-#ifndef HAVE_WAYLAND
-   if (efc)
-     efc->ep = NULL;
-#endif
 }
 
 static void
@@ -434,7 +410,6 @@ _e_mod_effect_cb_client_restack(void *data, int type, void *event)
    return ECORE_CALLBACK_PASS_ON;
 }
 
-#ifdef HAVE_WAYLAND
 static Eina_Bool
 _e_mod_effect_cb_client_buffer_change(void *data, int ev_type, void *event)
 {
@@ -500,17 +475,15 @@ _e_mod_effect_cb_bind(struct wl_client *client, void *data EINA_UNUSED, uint32_t
 
    eina_hash_add(_effect->resources, &client, res);
 }
-#endif
+
 static void
 _e_mod_effect_cb_client_data_free(void *data)
 {
-#ifdef HAVE_WAYLAND
    E_Effect_Client *efc = data;
 
    if (efc->buffer_ref.buffer)
      e_comp_wl_buffer_reference(&efc->buffer_ref, NULL);
 
-#endif
    free(data);
 }
 
@@ -542,7 +515,6 @@ e_mod_effect_init(void)
    effect->clients = eina_hash_pointer_new(_e_mod_effect_cb_client_data_free);
    EINA_SAFETY_ON_NULL_GOTO(effect->clients, err);
 
-#ifdef HAVE_WAYLAND
    effect->resources = eina_hash_pointer_new(NULL);
    EINA_SAFETY_ON_NULL_GOTO(effect->resources, err);
 
@@ -555,7 +527,7 @@ e_mod_effect_init(void)
 
    E_LIST_HANDLER_APPEND(effect->event_hdlrs, E_EVENT_CLIENT_BUFFER_CHANGE,
                          _e_mod_effect_cb_client_buffer_change, effect);
-#endif
+
    E_LIST_HANDLER_APPEND(effect->event_hdlrs, E_EVENT_CLIENT_ADD,
                          _e_mod_effect_cb_client_add, effect);
 
@@ -616,12 +588,10 @@ e_mod_effect_shutdown()
    E_FREE_LIST(_effect->providers,  e_comp_object_effect_mover_del);
    E_FREE_LIST(_effect->event_hdlrs, ecore_event_handler_del);
 
-#ifdef HAVE_WAYLAND
    if (_effect->global)
      wl_global_destroy(_effect->global);
 
    E_FREE_FUNC(_effect->resources, eina_hash_free);
-#endif
    E_FREE_FUNC(_effect->clients, eina_hash_free);
 
    E_FREE(_effect);

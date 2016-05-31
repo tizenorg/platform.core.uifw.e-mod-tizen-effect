@@ -1,6 +1,8 @@
 #ifndef E_MOD_MAIN_H
 #define E_MOD_MAIN_H
 
+#include <e.h>
+
 /*** E Module ***/
 EAPI extern E_Module_Api e_modapi;
 

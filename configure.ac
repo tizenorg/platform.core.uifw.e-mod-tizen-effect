@@ -94,18 +94,6 @@ AC_ARG_ENABLE(homedir-install,
 	[ datadir="${HOME}/.e/e/modules/${PACKAGE}" ]
 )
 
-have_wayland_only=no
-AC_ARG_ENABLE([wayland-only],
-  AS_HELP_STRING([--enable-wayland-only],[enable wayland-only version of enlightenment @<:@default=disabled@:>@]),
-  [have_wayland_only=$enableval],
-  [have_wayland_only=no])
-AC_MSG_CHECKING([whether wayland-only version is enabled])
-if test "x${have_wayland_only}" != "xno"; then
-  AC_DEFINE_UNQUOTED([HAVE_WAYLAND_ONLY],[1],[enable wayland-only version of enlightenment])
-  AC_DEFINE_UNQUOTED([HAVE_WAYLAND],[1],[enable wayland version])
-fi
-AM_CONDITIONAL(HAVE_WAYLAND_ONLY, [test "x${have_wayland_only}" = xyes])
-
 dnl ========================================================================
 # output files
 dnl ========================================================================
