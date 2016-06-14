@@ -1,5 +1,5 @@
 #define COMP_EFFECT_DURATION 0.4
-#define COMP_EFFECT_DURATION_FAST 0.2
+#define COMP_EFFECT_DURATION_FAST 0.3
 
 collections {
 

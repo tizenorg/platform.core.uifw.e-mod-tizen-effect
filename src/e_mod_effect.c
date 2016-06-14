@@ -7,6 +7,7 @@ typedef struct _E_Effect_Client
    E_Client *ec;
    unsigned int animating;
    E_Comp_Wl_Buffer_Ref buffer_ref;
+   E_Pixmap *ep;
 } E_Effect_Client;
 
 static void
@@ -43,8 +44,15 @@ _e_mod_effect_event_send(E_Client *ec, Eina_Bool start, E_Effect_Type type)
          tizen_effect_type = TIZEN_EFFECT_TYPE_RESTACK;
          break;
       default:
+         ERR("Unsupported effect type: %d for %p", type, ec);
          return;
      }
+
+   EFFINF("SEND %.5s|type:%d|win:0x%08x|tz_effect:0x%08x",
+          ec->pixmap, ec,
+          start? "START":"END", type,
+          (unsigned int)e_client_util_win_get(ec),
+          (unsigned int)effect_resource);
 
    if (start)
      tizen_effect_send_start(effect_resource, surface_resource, tizen_effect_type);
@@ -60,6 +68,7 @@ _e_mod_effect_client_new(E_Client *ec)
    efc = E_NEW(E_Effect_Client, 1);
    efc->ec = ec;
    efc->animating = 0;
+   efc->ep = NULL;
 
    return efc;
 }
@@ -76,47 +85,107 @@ _e_mod_effect_client_get(E_Client *ec)
    return efc;
 }
 
-static void
+static E_Effect_Group
+_e_mod_effect_group_get(E_Client *ec)
+{
+   E_Effect_Group group = E_EFFECT_GROUP_NORMAL;
+
+   /* client_type */
+   switch (ec->client_type)
+     {
+      case 1: //homescreen
+         group = E_EFFECT_GROUP_HOME;
+         break;
+      case 2: //lockscreen
+         group = E_EFFECT_GROUP_LOCKSCREEN;
+         break;
+      default:
+         break;
+     }
+
+   /* client layer */
+   if (group == E_EFFECT_GROUP_NORMAL)
+     {
+        if (ec->layer > E_LAYER_CLIENT_NORMAL)
+          group = E_EFFECT_GROUP_NONE;
+     }
+
+   /* window_role */
+
+   /* etc */
+   if (ec->vkbd.vkbd)
+     group = E_EFFECT_GROUP_KEYBOARD;
+
+   return group;
+}
+
+static Eina_Bool
 _e_mod_effect_ref(E_Client *ec)
 {
    E_Effect_Client *efc;
 
-   if (!_effect) return;
+   if (!_effect) return EINA_FALSE;
 
    if (e_object_is_del(E_OBJECT(ec)))
      {
+        ERR("Client is deleted already! ec(%p)", ec);
         eina_hash_del_by_key(_effect->clients, &ec);
-        return;
+        return EINA_FALSE;
      }
 
    efc = _e_mod_effect_client_get(ec);
-   if (!efc) return;
+   if (!efc) return EINA_FALSE;
+
+   if (!ec->pixmap) return EINA_FALSE;
+   if ((e_pixmap_type_get(ec->pixmap) != E_PIXMAP_TYPE_EXT_OBJECT) &&
+       (!e_pixmap_usable_get(ec->pixmap)))
+     return EINA_FALSE;
 
    efc->animating ++;
    e_object_ref(E_OBJECT(ec));
+   efc->ep = e_pixmap_ref(ec->pixmap);
+
+   EFFINF("Effect ref efc(%p) animating:%d",
+          efc->ep, efc->ec, efc, efc->animating);
+
+   return EINA_TRUE;
 }
 
-static void
+static E_Client *
 _e_mod_effect_unref(E_Client *ec)
 {
    E_Effect_Client *efc;
+   int do_unref = 1;
 
-   if (!_effect) return;
+   if (!_effect) return NULL;
 
    efc = _e_mod_effect_client_get(ec);
-   if (!efc) return;
+   if (!efc) return NULL;
 
-   while(efc->animating)
+   if (e_object_is_del(E_OBJECT(ec)))
+     do_unref = efc->animating;
+
+   efc->animating -= do_unref;
+   while (do_unref)
      {
+        e_pixmap_free(efc->ep);
         if (!e_object_unref(E_OBJECT(ec)))
           {
+             EFFINF("Effect unref efc(%p) Client free'd",
+                    efc->ep, ec, efc);
+
+             efc->ec = NULL;
              efc = NULL;
              eina_hash_del_by_key(_effect->clients, &ec);
-             break;
+             return NULL;
           }
-
-        efc->animating --;
+        do_unref --;
      }
+
+   EFFINF("Effect Unref efc(%p) animating:%d",
+          ec->pixmap, ec, efc, efc->animating);
+
+   return ec;
 }
 
 static void
@@ -141,6 +210,42 @@ _e_mod_effect_object_setup(E_Client *ec)
 }
 
 static void
+_e_mod_effect_pending_effect_start()
+{
+   E_Client *ec;
+
+   ec = _effect->next_done.ec;
+   if (!ec) return;
+
+   EFFINF("Pending Effect Start type(%d)",
+          ec->pixmap, ec, _effect->next_done.type);
+
+   if (_effect->next_done.cb)
+     {
+        _e_mod_effect_event_send(ec, EINA_TRUE, _effect->next_done.type);
+        e_comp_object_effect_start(ec->frame,
+                                   _effect->next_done.cb,
+                                   _effect->next_done.data);
+     }
+
+   memset(&_effect->next_done, 0, sizeof(_effect->next_done));
+}
+
+static void
+_e_mod_effect_pending_effect_set(E_Client *ec, void *data, E_Effect_Type type, Edje_Signal_Cb done_cb)
+{
+   _e_mod_effect_pending_effect_start();
+
+   EFFINF("Pending Effect Set type(%d)",
+          ec->pixmap, ec, type);
+
+   _effect->next_done.cb = done_cb;
+   _effect->next_done.ec = ec;
+   _effect->next_done.data = data;
+   _effect->next_done.type = type;
+}
+
+static void
 _e_mod_effect_stack_update()
 {
    E_Client *ec;
@@ -156,6 +261,7 @@ _e_mod_effect_stack_update()
         ec = evas_object_data_get(o, "E_Client");
         if (!ec) continue;
         if (e_client_util_ignored_get(ec)) continue;
+        if (e_object_is_del(E_OBJECT(ec))) continue;
 
         _effect->stack.cur = eina_list_remove(_effect->stack.cur, ec);
         _effect->stack.cur = eina_list_append(_effect->stack.cur, ec);
@@ -163,13 +269,14 @@ _e_mod_effect_stack_update()
 }
 
 static Eina_Bool
-_e_mod_effect_visibility_check(E_Client *ec, Eina_List *stack)
+_e_mod_effect_visibility_stack_check(E_Client *ec, Eina_List *stack)
 {
    Eina_List *l;
    E_Client *_ec;
    Eina_Tiler *tiler;
    Eina_Rectangle r;
    Eina_Bool vis = EINA_TRUE;
+   int x, y, w, h;
 
    if (!stack) return EINA_FALSE;
 
@@ -181,9 +288,17 @@ _e_mod_effect_visibility_check(E_Client *ec, Eina_List *stack)
    EINA_LIST_FOREACH(stack, l, _ec)
      {
         if (_ec == ec) break;
-        if ((_ec->iconic) || (!_ec->visible) || (_ec->argb)) continue;
+        if (!_ec->visible) continue;
+        if (!evas_object_visible_get(_ec->frame))
+          {
+             if (!_ec->iconic) continue;
+             if (_ec->iconic && _ec->exp_iconify.by_client) continue;
+          }
+        if (!e_pixmap_resource_get(_ec->pixmap)) continue;
 
-        EINA_RECTANGLE_SET(&r, _ec->x, _ec->y, _ec->w, _ec->h);
+        e_client_geometry_get(_ec, &x, &y, &w, &h);
+
+        EINA_RECTANGLE_SET(&r, x, y, w, h);
         eina_tiler_rect_del(tiler, &r);
 
         if (eina_tiler_empty(tiler))
@@ -203,43 +318,81 @@ _e_mod_effect_restack_effect_check(E_Client *ec)
    const char* emission = NULL;
    Eina_Bool v1, v2;
 
-   if (!_effect) return NULL;
-   if (!ec->visible) return NULL;
+   if (!evas_object_visible_get(ec->frame)) return NULL;
    if (ec->new_client) return NULL;
 
-   v1 = _e_mod_effect_visibility_check(ec, _effect->stack.old);
-   v2 = _e_mod_effect_visibility_check(ec, _effect->stack.cur);
+   v1 = _e_mod_effect_visibility_stack_check(ec, _effect->stack.old);
+   v2 = _e_mod_effect_visibility_stack_check(ec, _effect->stack.cur);
 
    if (v1 != v2)
      {
-        if (v2) emission = "e,action,restack,show";
-        else emission = "e,action,restack,hide";
+        if (v2 && ec->visibility.obscured != E_VISIBILITY_UNOBSCURED)
+          emission = "e,action,restack,show";
+        else if (!v2 && ec->visibility.obscured == E_VISIBILITY_FULLY_OBSCURED)
+          emission = "e,action,restack,hide";
      }
+
+   EFFINF("Restack Effect Check v1(%d) -> v2(%d) obscured:%d emission:%s",
+          ec->pixmap, ec,
+          v1, v2, ec->visibility.obscured, emission);
 
    return emission;
 }
 
 static void
-_e_mod_effect_cb_visible_done(void *data, Evas_Object *obj, const char *sig, const char *src)
+_e_mod_effect_cb_visible_done(void *data, Evas_Object *obj EINA_UNUSED, const char *sig EINA_UNUSED, const char *src EINA_UNUSED)
 {
-   E_Client *ec;
-   ec = (E_Client*) data;
+   E_Client *ec = NULL;
 
-   _e_mod_effect_event_send(ec, EINA_FALSE, E_EFFECT_TYPE_SHOW);
-   _e_mod_effect_unref(ec);
+   if ((ec = (E_Client*) data))
+     {
+        _e_mod_effect_event_send(ec, EINA_FALSE, E_EFFECT_TYPE_SHOW);
+        if (_e_mod_effect_unref(ec))
+          {
+             if (_e_mod_effect_client_get(ec))
+               {
+                  if (!eina_list_data_find(_effect->stack.cur, ec))
+                    _e_mod_effect_stack_update();
+
+                  e_client_visibility_skip_set(ec, EINA_FALSE);
+               }
+          }
+     }
+
+   e_comp_override_del();
 }
 
 static Eina_Bool
 _e_mod_effect_cb_visible(void *data, Evas_Object *obj, const char *signal)
 {
    E_Client *ec;
+   E_Effect_Group group;
+
+   if (!_effect) return EINA_FALSE;
+
    ec = e_comp_object_client_get(obj);
+   if (!ec) return EINA_FALSE;
+   if (e_object_is_del(E_OBJECT(ec))) return EINA_FALSE;
+
+   group = _e_mod_effect_group_get(ec);
+   if (group != E_EFFECT_GROUP_NORMAL) return EINA_FALSE;
 
    if (evas_object_visible_get(obj)) return EINA_FALSE;
+   if (!_e_mod_effect_ref(ec)) return EINA_FALSE;
 
-   _e_mod_effect_ref(ec);
+   e_comp_override_add();
+   e_client_visibility_skip_set(ec, EINA_TRUE);
+
    _e_mod_effect_object_setup(ec);
    e_comp_object_effect_params_set(ec->frame, 0, (int[]){0}, 1);
+   if (e_comp->nocomp)
+     {
+         _e_mod_effect_pending_effect_set(ec,
+                                          (void*)ec,
+                                          E_EFFECT_TYPE_SHOW,
+                                          _e_mod_effect_cb_visible_done);
+         return EINA_TRUE;
+     }
 
    _e_mod_effect_event_send(ec, EINA_TRUE, E_EFFECT_TYPE_SHOW);
    e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_visible_done, ec);
@@ -250,28 +403,76 @@ _e_mod_effect_cb_visible(void *data, Evas_Object *obj, const char *signal)
 static void
 _e_mod_effect_cb_hidden_done(void *data, Evas_Object *obj, const char *sig, const char *src)
 {
-   E_Client *ec;
-   ec = (E_Client*) data;
+   E_Client *ec = NULL;
 
-   _e_mod_effect_event_send(ec, EINA_FALSE, E_EFFECT_TYPE_HIDE);
-   _e_mod_effect_unref(ec);
 
-   if (_e_mod_effect_client_get(ec))
-     evas_object_hide(ec->frame);
+   if ((ec = (E_Client*) data))
+     {
+        _e_mod_effect_event_send(ec, EINA_FALSE, E_EFFECT_TYPE_HIDE);
+        if (_e_mod_effect_unref(ec))
+          {
+             if (_e_mod_effect_client_get(ec))
+               {
+                  evas_object_layer_set(ec->frame, ec->layer);
+                  ec->layer_block = 0;
+                  e_client_visibility_skip_set(ec, EINA_FALSE);
+                  evas_object_hide(ec->frame);
+               }
+          }
+     }
+
+   e_comp_override_del();
 }
 
 static Eina_Bool
 _e_mod_effect_cb_hidden(void *data, Evas_Object *obj, const char *signal)
 {
    E_Client *ec;
+   E_Effect_Group group;
+   Eina_Bool lowered = 0;
+   Evas_Object *below;
+   int map_layer;
+
+   if (!_effect) return EINA_FALSE;
+
    ec = e_comp_object_client_get(obj);
+   if (!ec) return EINA_FALSE;
+   if (e_object_is_del(E_OBJECT(ec))) return EINA_FALSE;
+
+   group = _e_mod_effect_group_get(ec);
+   if (group != E_EFFECT_GROUP_NORMAL) return EINA_FALSE;
 
    if (!evas_object_visible_get(obj)) return EINA_FALSE;
+   if (!_e_mod_effect_ref(ec)) return EINA_FALSE;
 
-   _e_mod_effect_ref(ec);
+   e_comp_override_add();
+
+   //check if client was lowered
+   below = evas_object_below_get(obj);
+   map_layer = e_comp_canvas_layer_map(evas_object_layer_get(obj));
+   if ((below) &&
+       (evas_object_layer_get(below) != evas_object_layer_get(obj)) &&
+       (evas_object_above_get(obj) != e_comp->layers[map_layer].obj))
+     lowered = 1;
+
+   if (lowered)
+     {
+        ec->layer_block = 1;
+        evas_object_layer_set(ec->frame, ec->layer + 1);
+        e_client_visibility_skip_set(ec, EINA_TRUE);
+     }
 
    _e_mod_effect_object_setup(ec);
    e_comp_object_effect_params_set(ec->frame, 0, (int[]){1}, 1);
+
+   if (e_comp->nocomp)
+     {
+        _e_mod_effect_pending_effect_set(ec,
+                                         (void*)ec,
+                                         E_EFFECT_TYPE_HIDE,
+                                         _e_mod_effect_cb_hidden_done);
+        return EINA_TRUE;
+     }
 
    _e_mod_effect_event_send(ec, EINA_TRUE, E_EFFECT_TYPE_HIDE);
    e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_hidden_done, ec);
@@ -280,72 +481,324 @@ _e_mod_effect_cb_hidden(void *data, Evas_Object *obj, const char *signal)
 }
 
 static void
-_e_mod_effect_cb_restack_show_done(void *data, Evas_Object *obj, const char *sig, const char *src)
+_e_mod_effect_cb_uniconify_done(void *data, Evas_Object *obj, const char *sig, const char *src)
+{
+   E_Client *ec = NULL;
+
+   if ((ec = (E_Client*) data))
+     {
+        _e_mod_effect_event_send(ec, EINA_FALSE, E_EFFECT_TYPE_SHOW);
+        _e_mod_effect_unref(ec);
+     }
+
+   e_comp_override_del();
+}
+
+static Eina_Bool
+_e_mod_effect_cb_uniconify(void *data, Evas_Object *obj, const char *signal)
 {
    E_Client *ec;
-   ec = (E_Client*)data;
+   E_Effect_Group group;
+   Eina_Bool v1, v2;
 
-   _e_mod_effect_unref(ec);
-   evas_object_layer_set(ec->frame, ec->layer);
-   ec->layer_block = 0;
-   _e_mod_effect_stack_update();
+   if (!_effect) return EINA_FALSE;
+
+   ec = e_comp_object_client_get(obj);
+   if (!ec) return EINA_FALSE;
+   if (e_object_is_del(E_OBJECT(ec))) return EINA_FALSE;
+
+   if (evas_object_visible_get(obj)) return EINA_FALSE;
+
+   group = _e_mod_effect_group_get(ec);
+
+   /* for HOME group */
+   if (group == E_EFFECT_GROUP_HOME)
+     {
+        E_Client *below;
+        below = e_client_below_get(ec);
+        while (below)
+          {
+             if ((evas_object_visible_get(below->frame)) &&
+                 (below->layer == ec->layer) &&
+                 ((below->visibility.obscured == E_VISIBILITY_UNOBSCURED) ||
+                  (below->visibility.changed)))
+               break;
+
+             below = e_client_below_get(below);
+          }
+
+        if (!below) return EINA_FALSE;
+        group = _e_mod_effect_group_get(below);
+        if (group != E_EFFECT_GROUP_NORMAL) return EINA_FALSE;
+
+        EFFINF("for HOME group do hide effect of %p",
+               ec->pixmap, ec, below);
+        e_comp_object_signal_emit(below->frame, "e,action,restack,hide", "e");
+        return EINA_TRUE;
+     }
+   /* for NORMAL group */
+   else if (group == E_EFFECT_GROUP_NORMAL)
+     {
+        v1 = _e_mod_effect_visibility_stack_check(ec, _effect->stack.old);
+        v2 = _e_mod_effect_visibility_stack_check(ec, _effect->stack.cur);
+
+        if (v1 == v2) return EINA_FALSE;
+        if ((v2) && (ec->visibility.obscured == E_VISIBILITY_UNOBSCURED)) return EINA_FALSE;
+        if ((!v2) && (ec->visibility.obscured != E_VISIBILITY_UNOBSCURED)) return EINA_FALSE;
+
+        if (!_e_mod_effect_ref(ec)) return EINA_FALSE;
+
+        e_comp_override_add();
+
+        _e_mod_effect_object_setup(ec);
+        e_comp_object_effect_params_set(ec->frame, 0, (int[]){0}, 1);
+
+        if (e_comp->nocomp)
+          {
+             _e_mod_effect_pending_effect_set(ec,
+                                              (void*)ec,
+                                              E_EFFECT_TYPE_SHOW,
+                                              _e_mod_effect_cb_uniconify_done);
+             return EINA_TRUE;
+          }
+
+        _e_mod_effect_event_send(ec, EINA_TRUE, E_EFFECT_TYPE_SHOW);
+        e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_uniconify_done, ec);
+        return EINA_TRUE;
+     }
+
+   return EINA_FALSE;
+}
+
+static void
+_e_mod_effect_cb_iconify_done(void *data, Evas_Object *obj, const char *sig, const char *src)
+{
+   E_Client *ec = NULL;
+
+   if ((ec = (E_Client*) data))
+     {
+        _e_mod_effect_event_send(ec, EINA_FALSE, E_EFFECT_TYPE_HIDE);
+        if (_e_mod_effect_unref(ec))
+          {
+             if (_e_mod_effect_client_get(ec))
+               evas_object_hide(ec->frame);
+          }
+     }
+
+   e_comp_override_del();
+}
+
+static Eina_Bool
+_e_mod_effect_cb_iconify(void *data, Evas_Object *obj, const char *signal)
+{
+   E_Client *ec;
+   E_Effect_Group group;
+
+   if (!_effect) return EINA_FALSE;
+
+   ec = e_comp_object_client_get(obj);
+   if (!ec) return EINA_FALSE;
+   if (e_object_is_del(E_OBJECT(ec))) return EINA_FALSE;
+
+   group = _e_mod_effect_group_get(ec);
+   if (group != E_EFFECT_GROUP_NORMAL) return EINA_FALSE;
+
+   if (!evas_object_visible_get(obj)) return EINA_FALSE;
+   if (!_e_mod_effect_visibility_stack_check(ec, _effect->stack.cur)) return EINA_FALSE;
+   if (!_e_mod_effect_ref(ec)) return EINA_FALSE;
+
+   e_comp_override_add();
+
+   _e_mod_effect_object_setup(ec);
+   e_comp_object_effect_params_set(ec->frame, 0, (int[]){1}, 1);
+
+   if (e_comp->nocomp)
+     {
+        _e_mod_effect_pending_effect_set(ec,
+                                         (void*)ec,
+                                         E_EFFECT_TYPE_HIDE,
+                                         _e_mod_effect_cb_iconify_done);
+        return EINA_TRUE;
+     }
+
+   _e_mod_effect_event_send(ec, EINA_TRUE, E_EFFECT_TYPE_HIDE);
+   e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_iconify_done, ec);
+
+   return EINA_TRUE;
+}
+static void
+_e_mod_effect_cb_restack_show_done(void *data, Evas_Object *obj, const char *sig, const char *src)
+{
+   E_Client *ec = NULL;
+
+   if ((ec = (E_Client*)data))
+     {
+        if (_e_mod_effect_unref(ec))
+          {
+             if (_e_mod_effect_client_get(ec))
+               {
+                  evas_object_layer_set(ec->frame, ec->layer);
+                  ec->layer_block = 0;
+                  e_client_visibility_skip_set(ec, EINA_FALSE);
+                  _e_mod_effect_stack_update();
+               }
+          }
+     }
+
+   e_comp_override_del();
 }
 
 static void
 _e_mod_effect_cb_restack_hide_done(void *data, Evas_Object *obj, const char *sig, const char *src)
 {
-   E_Client *ec = data;
-   ec = (E_Client*)data;
+   E_Client *ec = NULL;
 
-   _e_mod_effect_unref(ec);
-   evas_object_layer_set(ec->frame, ec->layer);
-   ec->layer_block = 0;
-   _e_mod_effect_stack_update();
+   if ((ec = (E_Client*)data))
+     {
+        if (_e_mod_effect_unref(ec))
+          {
+             if (_e_mod_effect_client_get(ec))
+               {
+                  evas_object_layer_set(ec->frame, ec->layer);
+                  ec->layer_block = 0;
+                  e_client_visibility_skip_set(ec, EINA_FALSE);
+                  _e_mod_effect_stack_update();
 
-   e_comp_object_signal_emit(ec->frame, "e,action,restack,finish", "e");
+                  e_comp_object_signal_emit(ec->frame,
+                                            "e,action,restack,finish", "e");
+               }
+          }
+     }
+
+   e_comp_override_del();
 }
 
 static void
 _e_mod_effect_cb_restack_finish_done(void *data, Evas_Object *obj, const char *sig, const char *src)
 {
-   E_Client *ec = data;
-   ec = (E_Client*)data;
+   E_Client *ec = NULL;
 
-   _e_mod_effect_event_send(ec, EINA_FALSE, E_EFFECT_TYPE_RESTACK_SHOW);
-   _e_mod_effect_unref(ec);
+   if ((ec = (E_Client*)data))
+     {
+        _e_mod_effect_event_send(ec, EINA_FALSE, E_EFFECT_TYPE_RESTACK_HIDE);
+        _e_mod_effect_unref(ec);
+     }
+
+   e_comp_override_del();
 }
 
 static Eina_Bool
 _e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
 {
    E_Client *ec;
-   ec = e_comp_object_client_get(obj);
+   E_Effect_Group group;
+   const char *emission;
 
-   _e_mod_effect_object_setup(ec);
-   if ((!e_util_strcmp(signal, "e,action,restack,show")))
+   if (!_effect) return EINA_FALSE;
+
+   ec = e_comp_object_client_get(obj);
+   if (!ec) return EINA_FALSE;
+   if (e_object_is_del(E_OBJECT(ec))) return EINA_FALSE;
+
+   group = _e_mod_effect_group_get(ec);
+   emission = eina_stringshare_add(signal);
+
+   /* for HOME group: replace effect target client */
+   if (group == E_EFFECT_GROUP_HOME)
      {
-        _e_mod_effect_ref(ec);
+        E_Client *below;
+
+        below = e_client_below_get(ec);
+        while (below)
+          {
+             if ((!e_object_is_del(E_OBJECT(below))) &&
+                 (evas_object_visible_get(below->frame)) &&
+                 (below->visibility.obscured == E_VISIBILITY_UNOBSCURED) &&
+                 (below->layer == ec->layer))
+               break;
+
+             below = e_client_below_get(below);
+          }
+
+        if (!below) return EINA_FALSE;
+        if (e_util_strcmp(signal, "e,action,restack,show")) return EINA_FALSE;
+
+        ec = below;
+        group = _e_mod_effect_group_get(ec);
+
+        if (emission) eina_stringshare_del(emission);
+        emission = eina_stringshare_add("e,action,restack,hide");
+     }
+
+   if (group != E_EFFECT_GROUP_NORMAL) return EINA_FALSE;
+   if ((!e_util_strcmp(emission, "e,action,restack,show")))
+     {
+        if (!_e_mod_effect_ref(ec)) return EINA_FALSE;
+
+        e_comp_override_add();
+
         ec->layer_block = 1;
-        evas_object_layer_set(ec->frame, E_LAYER_CLIENT_PRIO);
+        evas_object_layer_set(ec->frame, ec->layer + 1);
+        e_client_visibility_skip_set(ec, EINA_TRUE);
+
+        _e_mod_effect_object_setup(ec);
         e_comp_object_effect_params_set(ec->frame, 0, (int[]){2}, 1);
+
+        if (e_comp->nocomp)
+          {
+             _e_mod_effect_pending_effect_set(ec,
+                                              (void*)ec,
+                                              E_EFFECT_TYPE_SHOW,
+                                              _e_mod_effect_cb_restack_show_done);
+             return EINA_TRUE;
+          }
 
         _e_mod_effect_event_send(ec, EINA_TRUE, E_EFFECT_TYPE_RESTACK_SHOW);
         e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_restack_show_done, ec);
      }
-   else if (!e_util_strcmp(signal, "e,action,restack,hide"))
+   else if (!e_util_strcmp(emission, "e,action,restack,hide"))
      {
-        _e_mod_effect_ref(ec);
+        if (!_e_mod_effect_ref(ec)) return EINA_FALSE;
+
+        e_comp_override_add();
+
         ec->layer_block = 1;
-        evas_object_layer_set(ec->frame, E_LAYER_CLIENT_PRIO);
+        evas_object_layer_set(ec->frame, ec->layer + 1);
+        e_client_visibility_skip_set(ec, EINA_TRUE);
+
+        _e_mod_effect_object_setup(ec);
         e_comp_object_effect_params_set(ec->frame, 0, (int[]){3}, 1);
+
+        if (e_comp->nocomp)
+          {
+             _e_mod_effect_pending_effect_set(ec,
+                                              (void*)ec,
+                                              E_EFFECT_TYPE_HIDE,
+                                              _e_mod_effect_cb_restack_hide_done);
+             return EINA_TRUE;
+          }
 
         _e_mod_effect_event_send(ec, EINA_TRUE, E_EFFECT_TYPE_RESTACK_HIDE);
         e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_restack_hide_done, ec);
      }
-   else if (!e_util_strcmp(signal, "e,action,restack,finish"))
+   else if (!e_util_strcmp(emission, "e,action,restack,finish"))
      {
-        _e_mod_effect_ref(ec);
+        if (!_e_mod_effect_ref(ec)) return EINA_FALSE;
+
+        e_comp_override_add();
+
+        _e_mod_effect_object_setup(ec);
         e_comp_object_effect_params_set(ec->frame, 0, (int[]){4}, 1);
+
+        if (e_comp->nocomp)
+          {
+             _e_mod_effect_pending_effect_set(ec,
+                                              (void*)ec,
+                                              E_EFFECT_TYPE_HIDE,
+                                              _e_mod_effect_cb_restack_finish_done);
+             return EINA_TRUE;
+          }
+
         e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_restack_finish_done, ec);
      }
 
@@ -383,8 +836,12 @@ _e_mod_effect_cb_client_remove(void *data, int type, void *event)
    if (!_effect) return ECORE_CALLBACK_PASS_ON;
 
    ec = ev->ec;
+
    _effect->stack.old = eina_list_remove(_effect->stack.old, ec);
    _effect->stack.cur = eina_list_remove(_effect->stack.cur, ec);
+
+   if (_effect->next_done.ec == ec)
+     memset(&_effect->next_done, 0, sizeof(_effect->next_done));
 
    if ((efc = _e_mod_effect_client_get(ec)))
      {
@@ -402,10 +859,26 @@ _e_mod_effect_cb_client_restack(void *data, int type, void *event)
    E_Event_Client *ev = event;
    const char* emission = NULL;
 
+   if (!_effect) return ECORE_CALLBACK_PASS_ON;
+
    ec = ev->ec;
+   if (!ec) return ECORE_CALLBACK_PASS_ON;
+   if (e_object_is_del(E_OBJECT(ec))) return ECORE_CALLBACK_PASS_ON;
+
    _e_mod_effect_stack_update();
+
    if ((emission = _e_mod_effect_restack_effect_check(ec)))
      e_comp_object_signal_emit(ec->frame, emission, "e");
+
+   return ECORE_CALLBACK_PASS_ON;
+}
+
+static Eina_Bool
+_e_mod_effect_cb_comp_enabled(void *data, int ev_type, void *event)
+{
+   if (!_effect) return ECORE_CALLBACK_PASS_ON;
+
+   _e_mod_effect_pending_effect_start();
 
    return ECORE_CALLBACK_PASS_ON;
 }
@@ -417,6 +890,8 @@ _e_mod_effect_cb_client_buffer_change(void *data, int ev_type, void *event)
    E_Client *ec;
    E_Effect_Client *efc;
    E_Comp_Wl_Buffer *buffer = NULL;
+
+   if (!_effect) return ECORE_CALLBACK_PASS_ON;
 
    ec = ev->ec;
    if (!ec) return ECORE_CALLBACK_PASS_ON;
@@ -481,10 +956,12 @@ _e_mod_effect_cb_client_data_free(void *data)
 {
    E_Effect_Client *efc = data;
 
+   if (!efc) return;
+
    if (efc->buffer_ref.buffer)
      e_comp_wl_buffer_reference(&efc->buffer_ref, NULL);
 
-   free(data);
+   free(efc);
 }
 
 EAPI Eina_Bool
@@ -525,6 +1002,9 @@ e_mod_effect_init(void)
         goto err;
      }
 
+   E_LIST_HANDLER_APPEND(effect->event_hdlrs, E_EVENT_COMPOSITOR_ENABLE,
+                         _e_mod_effect_cb_comp_enabled, effect);
+
    E_LIST_HANDLER_APPEND(effect->event_hdlrs, E_EVENT_CLIENT_BUFFER_CHANGE,
                          _e_mod_effect_cb_client_buffer_change, effect);
 
@@ -553,13 +1033,13 @@ e_mod_effect_init(void)
       eina_list_append(effect->providers,
                        e_comp_object_effect_mover_add(100,
                                                       "e,action,iconify",
-                                                      _e_mod_effect_cb_hidden,
+                                                      _e_mod_effect_cb_iconify,
                                                       effect));
    effect->providers =
       eina_list_append(effect->providers,
                        e_comp_object_effect_mover_add(100,
                                                       "e,action,uniconify",
-                                                      _e_mod_effect_cb_visible,
+                                                      _e_mod_effect_cb_uniconify,
                                                       effect));
    effect->providers =
       eina_list_append(effect->providers,

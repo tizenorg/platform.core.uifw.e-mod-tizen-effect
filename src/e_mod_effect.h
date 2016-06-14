@@ -1,12 +1,28 @@
 #ifndef E_MOD_EFFECT_H
 # define E_MOD_EFFECT_H
 
-# include "config.h"
 # include <e.h>
 # include <tizen-extension-server-protocol.h>
 
+#define EFFINF(f, cp, ec, x...) ELOGF("EFFECT", f, cp, ec, ##x)
+#define EFFDBG(f, cp, ec, x...)                            \
+   do                                                      \
+     {                                                     \
+        if ((!cp) && (!ec))                                \
+          DBG("EWL|%20.20s|             |             |"f, \
+              "EFFECT", ##x);                                   \
+        else                                               \
+          DBG("EWL|%20.20s|cp:0x%08x|ec:0x%08x|"f,         \
+              "EFFECT",                                         \
+              (unsigned int)(cp),                          \
+              (unsigned int)(ec),                          \
+              ##x);                                        \
+     }                                                     \
+   while (0)
+
 typedef struct _E_Effect E_Effect;
 typedef enum _E_Effect_Type E_Effect_Type;
+typedef enum _E_Effect_Group E_Effect_Group;
 
 enum _E_Effect_Type
 {
@@ -17,6 +33,15 @@ enum _E_Effect_Type
    E_EFFECT_TYPE_RESTACK_SHOW,
    E_EFFECT_TYPE_RESTACK_HIDE,
    E_EFFECT_TYPE_NONE,
+};
+
+enum _E_Effect_Group
+{
+   E_EFFECT_GROUP_NORMAL,
+   E_EFFECT_GROUP_HOME,
+   E_EFFECT_GROUP_LOCKSCREEN,
+   E_EFFECT_GROUP_KEYBOARD,
+   E_EFFECT_GROUP_NONE,
 };
 
 struct _E_Effect
@@ -35,6 +60,13 @@ struct _E_Effect
       Eina_List *old;
       Eina_List *cur;
    } stack;
+
+   struct {
+      Edje_Signal_Cb cb;
+      E_Client *ec;
+      void *data;
+      E_Effect_Type type;
+   } next_done;
 
 };
 
