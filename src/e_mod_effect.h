@@ -57,6 +57,10 @@ struct _E_Effect
    Eina_Hash *clients;
 
    struct {
+        Evas_Object *obj;
+   }layers[E_CLIENT_LAYER_COUNT];
+
+   struct {
       Eina_List *old;
       Eina_List *cur;
    } stack;
