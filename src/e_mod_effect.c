@@ -90,6 +90,9 @@ _e_mod_effect_group_get(E_Client *ec)
 {
    E_Effect_Group group = E_EFFECT_GROUP_NORMAL;
 
+   /* animatable setting by aux_hint */
+   if (ec->animatable) return E_EFFECT_GROUP_NONE;
+
    /* client_type */
    switch (ec->client_type)
      {
