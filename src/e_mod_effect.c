@@ -210,6 +210,30 @@ _e_mod_effect_object_setup(E_Client *ec)
 }
 
 static void
+_e_mod_effect_object_layer_up(E_Client *ec)
+{
+   int map_layer;
+
+   map_layer = e_comp_canvas_client_layer_map(ec->layer);
+   if (!_effect->layers[map_layer].obj)
+     {
+        _effect->layers[map_layer].obj = evas_object_rectangle_add(e_comp->evas);
+        evas_object_layer_set(_effect->layers[map_layer].obj, ec->layer + 1);
+        evas_object_name_set(_effect->layers[map_layer].obj, "layer_obj(effect)");
+     }
+
+   ec->layer_block = 1;
+   evas_object_layer_set(ec->frame, ec->layer + 1);
+}
+
+static void
+_e_mod_effect_object_layer_down(E_Client *ec)
+{
+   evas_object_layer_set(ec->frame, ec->layer);
+   ec->layer_block = 0;
+}
+
+static void
 _e_mod_effect_pending_effect_start()
 {
    E_Client *ec;
@@ -326,15 +350,33 @@ _e_mod_effect_restack_effect_check(E_Client *ec)
 
    if (v1 != v2)
      {
-        if (v2 && ec->visibility.obscured != E_VISIBILITY_UNOBSCURED)
+        if ((v2) && (ec->visibility.obscured != E_VISIBILITY_UNOBSCURED))
           emission = "e,action,restack,show";
-        else if (!v2 && ec->visibility.obscured == E_VISIBILITY_FULLY_OBSCURED)
+        else if ((!v2) && (ec->visibility.obscured == E_VISIBILITY_FULLY_OBSCURED))
           emission = "e,action,restack,hide";
      }
+   else
+     {
+        E_Effect_Client *efc;
+        efc = _e_mod_effect_client_get(ec);
 
-   EFFINF("Restack Effect Check v1(%d) -> v2(%d) obscured:%d emission:%s",
+        // TODO : it's for transients windows. wish using other check */
+        if ((efc) && (!efc->animating))
+          {
+             if ((v2) && (!ec->iconic) &&
+                 (ec->visibility.obscured != E_VISIBILITY_UNOBSCURED))
+               emission = "e,action,restack,show";
+             else if ((!v2) && (ec->iconic) &&
+                      (ec->visibility.obscured == E_VISIBILITY_UNOBSCURED))
+               emission = "e,action,restack,hide";
+          }
+     }
+
+   EFFINF("Restack Effect Check v1(%d) -> v2(%d) iconic:%d "
+          "obscured:%d(%d) emission:%s",
           ec->pixmap, ec,
-          v1, v2, ec->visibility.obscured, emission);
+          v1, v2, ec->iconic,
+          ec->visibility.obscured, ec->visibility.changed, emission);
 
    return emission;
 }
@@ -351,14 +393,12 @@ _e_mod_effect_cb_visible_done(void *data, Evas_Object *obj EINA_UNUSED, const ch
           {
              if (_e_mod_effect_client_get(ec))
                {
-                  if (!eina_list_data_find(_effect->stack.cur, ec))
-                    _e_mod_effect_stack_update();
-
                   e_client_visibility_skip_set(ec, EINA_FALSE);
                }
           }
      }
 
+   _e_mod_effect_stack_update();
    e_comp_override_del();
 }
 
@@ -413,8 +453,7 @@ _e_mod_effect_cb_hidden_done(void *data, Evas_Object *obj, const char *sig, cons
           {
              if (_e_mod_effect_client_get(ec))
                {
-                  evas_object_layer_set(ec->frame, ec->layer);
-                  ec->layer_block = 0;
+                  _e_mod_effect_object_layer_down(ec);
                   e_client_visibility_skip_set(ec, EINA_FALSE);
                   evas_object_hide(ec->frame);
                }
@@ -457,8 +496,7 @@ _e_mod_effect_cb_hidden(void *data, Evas_Object *obj, const char *signal)
 
    if (lowered)
      {
-        ec->layer_block = 1;
-        evas_object_layer_set(ec->frame, ec->layer + 1);
+        _e_mod_effect_object_layer_up(ec);
         e_client_visibility_skip_set(ec, EINA_TRUE);
      }
 
@@ -531,8 +569,9 @@ _e_mod_effect_cb_uniconify(void *data, Evas_Object *obj, const char *signal)
         group = _e_mod_effect_group_get(below);
         if (group != E_EFFECT_GROUP_NORMAL) return EINA_FALSE;
 
-        EFFINF("for HOME group do hide effect of %p",
+        EFFINF("Uniconify HOME group do hide effect of %p",
                ec->pixmap, ec, below);
+
         e_comp_object_signal_emit(below->frame, "e,action,restack,hide", "e");
         return EINA_TRUE;
      }
@@ -541,6 +580,10 @@ _e_mod_effect_cb_uniconify(void *data, Evas_Object *obj, const char *signal)
      {
         v1 = _e_mod_effect_visibility_stack_check(ec, _effect->stack.old);
         v2 = _e_mod_effect_visibility_stack_check(ec, _effect->stack.cur);
+
+        EFFINF("Uniconify Effect Check v1(%d) -> v2(%d) obscured:%d changed:%d",
+               ec->pixmap, ec,
+               v1, v2, ec->visibility.obscured, ec->visibility.changed);
 
         if (v1 == v2) return EINA_FALSE;
         if ((v2) && (ec->visibility.obscured == E_VISIBILITY_UNOBSCURED)) return EINA_FALSE;
@@ -593,6 +636,7 @@ _e_mod_effect_cb_iconify(void *data, Evas_Object *obj, const char *signal)
 {
    E_Client *ec;
    E_Effect_Group group;
+   Eina_Bool v1, v2;
 
    if (!_effect) return EINA_FALSE;
 
@@ -604,7 +648,18 @@ _e_mod_effect_cb_iconify(void *data, Evas_Object *obj, const char *signal)
    if (group != E_EFFECT_GROUP_NORMAL) return EINA_FALSE;
 
    if (!evas_object_visible_get(obj)) return EINA_FALSE;
-   if (!_e_mod_effect_visibility_stack_check(ec, _effect->stack.cur)) return EINA_FALSE;
+
+   v1 = _e_mod_effect_visibility_stack_check(ec, _effect->stack.old);
+   v2 = _e_mod_effect_visibility_stack_check(ec, _effect->stack.cur);
+
+   EFFINF("Iconify Effect Check v1(%d) -> v2(%d) obscured:%d changed:%d",
+          ec->pixmap, ec,
+          v1, v2, ec->visibility.obscured, ec->visibility.changed);
+
+   if (v1 == v2) return EINA_FALSE;
+   if ((v2) && (ec->visibility.obscured == E_VISIBILITY_UNOBSCURED)) return EINA_FALSE;
+   if ((!v2) && (ec->visibility.obscured != E_VISIBILITY_UNOBSCURED)) return EINA_FALSE;
+
    if (!_e_mod_effect_ref(ec)) return EINA_FALSE;
 
    e_comp_override_add();
@@ -637,14 +692,13 @@ _e_mod_effect_cb_restack_show_done(void *data, Evas_Object *obj, const char *sig
           {
              if (_e_mod_effect_client_get(ec))
                {
-                  evas_object_layer_set(ec->frame, ec->layer);
-                  ec->layer_block = 0;
+                  _e_mod_effect_object_layer_down(ec);
                   e_client_visibility_skip_set(ec, EINA_FALSE);
-                  _e_mod_effect_stack_update();
                }
           }
      }
 
+   _e_mod_effect_stack_update();
    e_comp_override_del();
 }
 
@@ -659,17 +713,15 @@ _e_mod_effect_cb_restack_hide_done(void *data, Evas_Object *obj, const char *sig
           {
              if (_e_mod_effect_client_get(ec))
                {
-                  evas_object_layer_set(ec->frame, ec->layer);
-                  ec->layer_block = 0;
+                  _e_mod_effect_object_layer_down(ec);
                   e_client_visibility_skip_set(ec, EINA_FALSE);
-                  _e_mod_effect_stack_update();
-
                   e_comp_object_signal_emit(ec->frame,
                                             "e,action,restack,finish", "e");
                }
           }
      }
 
+   _e_mod_effect_stack_update();
    e_comp_override_del();
 }
 
@@ -684,6 +736,7 @@ _e_mod_effect_cb_restack_finish_done(void *data, Evas_Object *obj, const char *s
         _e_mod_effect_unref(ec);
      }
 
+   _e_mod_effect_stack_update();
    e_comp_override_del();
 }
 
@@ -737,8 +790,7 @@ _e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
 
         e_comp_override_add();
 
-        ec->layer_block = 1;
-        evas_object_layer_set(ec->frame, ec->layer + 1);
+        _e_mod_effect_object_layer_up(ec);
         e_client_visibility_skip_set(ec, EINA_TRUE);
 
         _e_mod_effect_object_setup(ec);
@@ -762,8 +814,7 @@ _e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
 
         e_comp_override_add();
 
-        ec->layer_block = 1;
-        evas_object_layer_set(ec->frame, ec->layer + 1);
+        _e_mod_effect_object_layer_up(ec);
         e_client_visibility_skip_set(ec, EINA_TRUE);
 
         _e_mod_effect_object_setup(ec);
@@ -865,7 +916,11 @@ _e_mod_effect_cb_client_restack(void *data, int type, void *event)
    if (!ec) return ECORE_CALLBACK_PASS_ON;
    if (e_object_is_del(E_OBJECT(ec))) return ECORE_CALLBACK_PASS_ON;
 
+   EFFINF("Client restacked", ec->pixmap, ec);
+
    _e_mod_effect_stack_update();
+
+   if (!_e_mod_effect_client_get(ec)) return ECORE_CALLBACK_PASS_ON;
 
    if ((emission = _e_mod_effect_restack_effect_check(ec)))
      e_comp_object_signal_emit(ec->frame, emission, "e");
