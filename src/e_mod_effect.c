@@ -396,7 +396,7 @@ _e_mod_effect_cb_visible_done(void *data, Evas_Object *obj EINA_UNUSED, const ch
           {
              if (_e_mod_effect_client_get(ec))
                {
-                  e_client_visibility_skip_set(ec, EINA_FALSE);
+//                  e_client_visibility_skip_set(ec, EINA_FALSE);
                }
           }
      }
@@ -424,7 +424,7 @@ _e_mod_effect_cb_visible(void *data, Evas_Object *obj, const char *signal)
    if (!_e_mod_effect_ref(ec)) return EINA_FALSE;
 
    e_comp_override_add();
-   e_client_visibility_skip_set(ec, EINA_TRUE);
+//   e_client_visibility_skip_set(ec, EINA_TRUE);
 
    _e_mod_effect_object_setup(ec);
    e_comp_object_effect_params_set(ec->frame, 0, (int[]){0}, 1);
@@ -457,7 +457,7 @@ _e_mod_effect_cb_hidden_done(void *data, Evas_Object *obj, const char *sig, cons
              if (_e_mod_effect_client_get(ec))
                {
                   _e_mod_effect_object_layer_down(ec);
-                  e_client_visibility_skip_set(ec, EINA_FALSE);
+//                  e_client_visibility_skip_set(ec, EINA_FALSE);
                   evas_object_hide(ec->frame);
                }
           }
@@ -500,7 +500,7 @@ _e_mod_effect_cb_hidden(void *data, Evas_Object *obj, const char *signal)
    if (lowered)
      {
         _e_mod_effect_object_layer_up(ec);
-        e_client_visibility_skip_set(ec, EINA_TRUE);
+//        e_client_visibility_skip_set(ec, EINA_TRUE);
      }
 
    _e_mod_effect_object_setup(ec);
@@ -708,7 +708,7 @@ _e_mod_effect_cb_restack_show_done(void *data, Evas_Object *obj, const char *sig
              if (_e_mod_effect_client_get(ec))
                {
                   _e_mod_effect_object_layer_down(ec);
-                  e_client_visibility_skip_set(ec, EINA_FALSE);
+//                  e_client_visibility_skip_set(ec, EINA_FALSE);
                }
           }
      }
@@ -729,7 +729,7 @@ _e_mod_effect_cb_restack_hide_done(void *data, Evas_Object *obj, const char *sig
              if (_e_mod_effect_client_get(ec))
                {
                   _e_mod_effect_object_layer_down(ec);
-                  e_client_visibility_skip_set(ec, EINA_FALSE);
+//                  e_client_visibility_skip_set(ec, EINA_FALSE);
                   e_comp_object_signal_emit(ec->frame,
                                             "e,action,restack,finish", "e");
                }
@@ -804,7 +804,7 @@ _e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
         e_comp_override_add();
 
         _e_mod_effect_object_layer_up(ec);
-        e_client_visibility_skip_set(ec, EINA_TRUE);
+//        e_client_visibility_skip_set(ec, EINA_TRUE);
 
         _e_mod_effect_object_setup(ec);
         e_comp_object_effect_params_set(ec->frame, 0, (int[]){2}, 1);
@@ -828,7 +828,7 @@ _e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
         e_comp_override_add();
 
         _e_mod_effect_object_layer_up(ec);
-        e_client_visibility_skip_set(ec, EINA_TRUE);
+//        e_client_visibility_skip_set(ec, EINA_TRUE);
 
         _e_mod_effect_object_setup(ec);
         e_comp_object_effect_params_set(ec->frame, 0, (int[]){3}, 1);
