@@ -1044,8 +1044,6 @@ e_mod_effect_init(void)
    effect = E_NEW(E_Effect, 1);
    EINA_SAFETY_ON_NULL_RETURN_VAL(effect, EINA_FALSE);
 
-   _effect = effect;
-
    if ((config = e_comp_config_get()))
      {
         effect->file = eina_stringshare_add(config->effect_file);
