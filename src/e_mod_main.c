@@ -1,5 +1,6 @@
 #include "e_mod_main.h"
 #include "e_mod_effect.h"
+#include "e_mod_effect_rotation.h"
 
 EAPI E_Module_Api e_modapi = { E_MODULE_API_VERSION, "Effect Module" };
 
@@ -9,11 +10,14 @@ e_modapi_init(E_Module *m)
    if (!e_mod_effect_init())
      return NULL;
 
+   e_mod_effect_rotation_init();
+
    return m;
 }
 EAPI int
 e_modapi_shutdown(E_Module *m EINA_UNUSED)
 {
+   e_mod_effect_rotation_shutdown();
    e_mod_effect_shutdown();
 
    return 1;
