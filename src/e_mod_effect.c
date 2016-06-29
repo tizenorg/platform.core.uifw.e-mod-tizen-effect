@@ -188,6 +188,12 @@ _e_mod_effect_unref(E_Client *ec)
    EFFINF("Effect Unref efc(%p) animating:%d",
           ec->pixmap, ec, efc, efc->animating);
 
+   if ((ec) && (ec->dead) && (ec->hidden))
+     {
+        if ((efc) && (efc->buffer_ref.buffer))
+          e_comp_wl_buffer_reference(&efc->buffer_ref, NULL);
+     }
+
    return ec;
 }
 
