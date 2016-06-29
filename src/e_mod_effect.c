@@ -224,6 +224,8 @@ _e_mod_effect_object_layer_up(E_Client *ec)
    int map_layer;
 
    map_layer = e_comp_canvas_client_layer_map(ec->layer);
+   if (map_layer == 9999) return;
+
    if (!_effect->layers[map_layer].obj)
      {
         _effect->layers[map_layer].obj = evas_object_rectangle_add(e_comp->evas);
@@ -498,7 +500,7 @@ _e_mod_effect_cb_hidden(void *data, Evas_Object *obj, const char *signal)
    //check if client was lowered
    below = evas_object_below_get(obj);
    map_layer = e_comp_canvas_layer_map(evas_object_layer_get(obj));
-   if ((below) &&
+   if ((below) && (map_layer != 9999) &&
        (evas_object_layer_get(below) != evas_object_layer_get(obj)) &&
        (evas_object_above_get(obj) != e_comp->layers[map_layer].obj))
      lowered = 1;
