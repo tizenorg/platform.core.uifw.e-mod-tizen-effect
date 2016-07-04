@@ -161,6 +161,7 @@ _e_mod_effect_unref(E_Client *ec)
    int do_unref = 1;
 
    if (!_effect) return NULL;
+   if (!ec) return NULL;
 
    efc = _e_mod_effect_client_get(ec);
    if (!efc) return NULL;
@@ -188,7 +189,7 @@ _e_mod_effect_unref(E_Client *ec)
    EFFINF("Effect Unref efc(%p) animating:%d",
           ec->pixmap, ec, efc, efc->animating);
 
-   if ((ec) && (ec->dead) && (ec->hidden))
+   if ((ec->dead) && (ec->hidden))
      {
         if ((efc) && (efc->buffer_ref.buffer))
           e_comp_wl_buffer_reference(&efc->buffer_ref, NULL);
@@ -245,7 +246,7 @@ _e_mod_effect_object_layer_down(E_Client *ec)
 }
 
 static void
-_e_mod_effect_pending_effect_start()
+_e_mod_effect_pending_effect_start(void)
 {
    E_Client *ec;
 
