@@ -151,10 +151,13 @@ _rotation_effect_targets_get(Rotation_Effect *effect)
                }
           }
 
+        l = eina_list_append(l, o);
+
+        if ((ec) && (ec->argb) && (ec->visibility.opaque <= 0))
+          continue;
+
         EINA_RECTANGLE_SET(&r, x, y, w + edge, h + edge);
         eina_tiler_rect_del(t, &r);
-
-        l = eina_list_append(l, o);
 
         if (eina_tiler_empty(t)) break;
      }
