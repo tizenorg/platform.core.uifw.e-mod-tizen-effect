@@ -175,8 +175,8 @@ _e_mod_effect_unref(E_Client *ec)
         e_pixmap_free(efc->ep);
         if (!e_object_unref(E_OBJECT(ec)))
           {
-             EFFINF("Effect unref efc(%p) Client free'd",
-                    efc->ep, ec, efc);
+             EFFINF("Effect unref ec(%p) ep(%p) efc(%p) Client free'd",
+                    NULL, NULL, ec, efc->ep, efc);
 
              efc->ec = NULL;
              efc = NULL;
