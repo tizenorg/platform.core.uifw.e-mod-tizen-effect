@@ -1,5 +1,5 @@
 Name: e-mod-tizen-effect
-Version: 0.0.9
+Version: 0.0.10
 Release: 1
 Summary: The effect module for the enlightenment
 URL: http://www.enlightenment.org
