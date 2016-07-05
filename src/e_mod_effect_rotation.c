@@ -115,13 +115,13 @@ _rotation_effect_targets_get(Rotation_Effect *effect)
 
    if (!effect) return NULL;
 
+   if (effect->zone->display_state == E_ZONE_DISPLAY_STATE_OFF)
+     return NULL;
+
    x = y = w = h = 0;
 
    t = eina_tiler_new(effect->zone->w + edge, effect->zone->h + edge);
    eina_tiler_tile_size_set(t, 1, 1);
-
-   if (effect->zone->display_state == E_ZONE_DISPLAY_STATE_OFF)
-     return NULL;
 
    EINA_RECTANGLE_SET(&r, effect->zone->x, effect->zone->y, effect->zone->w, effect->zone->h);
    eina_tiler_rect_add(t, &r);
@@ -147,6 +147,7 @@ _rotation_effect_targets_get(Rotation_Effect *effect)
                  (ec->e.state.rot.ang.curr == effect->zone->rot.curr))
                {
                   if (l) eina_list_free(l);
+                  eina_tiler_free(t);
                   return NULL;
                }
           }
@@ -161,6 +162,7 @@ _rotation_effect_targets_get(Rotation_Effect *effect)
 
         if (eina_tiler_empty(t)) break;
      }
+   eina_tiler_free(t);
 
    return l;
 }
@@ -218,7 +220,9 @@ _rotation_effect_object_create(Evas_Object *o)
 
              w = buffer->w;
              h = buffer->h;
+
              pix = wl_shm_buffer_get_data(buffer->shm_buffer);
+             if (!pix) goto fail;
 
              if (eobj->data_pool)
                wl_shm_pool_unref(eobj->data_pool);
@@ -232,6 +236,8 @@ _rotation_effect_object_create(Evas_Object *o)
              tbm_surface_map(tbm_surface, TBM_SURF_OPTION_READ, &surface_info);
 
              data = surface_info.planes[0].ptr;
+             if (!data) goto fail;
+
              w = surface_info.width;
              h = surface_info.height;
 
@@ -255,6 +261,8 @@ _rotation_effect_object_create(Evas_Object *o)
              tbm_surface_map(tbm_surface, TBM_SURF_OPTION_READ, &surface_info);
 
              data = surface_info.planes[0].ptr;
+             if (!data) goto fail;
+
              w = surface_info.width;
              h = surface_info.height;
 
