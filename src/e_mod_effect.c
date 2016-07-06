@@ -980,7 +980,7 @@ _e_mod_effect_cb_client_buffer_change(void *data, int ev_type, void *event)
      {
         buffer = e_pixmap_resource_get(ec->pixmap);
 
-        if ((buffer) && (buffer != efc->buffer_ref.buffer))
+        if (buffer != efc->buffer_ref.buffer)
           {
              e_comp_wl_buffer_reference(&efc->buffer_ref, buffer);
           }
