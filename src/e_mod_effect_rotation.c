@@ -525,8 +525,7 @@ _rotation_effect_clear(Rotation_Effect *effect)
    if (effect->ctx_begin)
      {
         _rotation_effect_animator_begin_context_free(effect->ctx_begin);
-        if (!effect->ctx_end)
-          e_comp_override_del();
+        e_comp_override_del();
      }
 
    if (effect->ctx_end)
