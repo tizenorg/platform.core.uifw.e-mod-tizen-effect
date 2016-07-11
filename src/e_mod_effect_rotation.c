@@ -140,7 +140,9 @@ _rotation_effect_targets_get(Rotation_Effect *effect)
         if (ec)
           {
              if (e_object_is_del(E_OBJECT(ec))) continue;
-             if (ec->visibility.obscured != E_VISIBILITY_UNOBSCURED) continue;
+             if ((ec->visibility.obscured != E_VISIBILITY_UNOBSCURED) &&
+                 (ec->iconic))
+               continue;
 
              if ((!ec->animatable) ||
                  (!_rotation_effect_available(ec, effect->zone->rot.curr)) ||
@@ -154,8 +156,14 @@ _rotation_effect_targets_get(Rotation_Effect *effect)
 
         l = eina_list_append(l, o);
 
-        if ((ec) && (ec->argb) && (ec->visibility.opaque <= 0))
-          continue;
+        if ((ec) && (ec->argb))
+          {
+             if (ec->visibility.opaque <= 0) continue;
+             else
+               {
+                  if (ec->parent) continue;
+               }
+          }
 
         EINA_RECTANGLE_SET(&r, x, y, w + edge, h + edge);
         eina_tiler_rect_del(t, &r);
