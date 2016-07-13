@@ -712,6 +712,7 @@ _e_mod_effect_cb_restack_show_done(void *data, Evas_Object *obj, const char *sig
 
    if ((ec = (E_Client*)data))
      {
+        _e_mod_effect_event_send(ec, EINA_FALSE, E_EFFECT_TYPE_RESTACK_SHOW);
         if (_e_mod_effect_unref(ec))
           {
              if (_e_mod_effect_client_get(ec))
