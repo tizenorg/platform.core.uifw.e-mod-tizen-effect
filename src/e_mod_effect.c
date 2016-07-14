@@ -8,6 +8,7 @@ typedef struct _E_Effect_Client
    unsigned int animating;
    E_Comp_Wl_Buffer_Ref buffer_ref;
    E_Pixmap *ep;
+   E_Client *reverse_ec;
 } E_Effect_Client;
 
 static void
@@ -57,7 +58,17 @@ _e_mod_effect_event_send(E_Client *ec, Eina_Bool start, E_Effect_Type type)
    if (start)
      tizen_effect_send_start(effect_resource, surface_resource, tizen_effect_type);
    else
-     tizen_effect_send_end(effect_resource, surface_resource, tizen_effect_type);
+     {
+        tizen_effect_send_end(effect_resource, surface_resource, tizen_effect_type);
+
+        EFFINF("Un-SET EXTRA_ANIMATING...", ec->pixmap, ec);
+        ec->extra_animating = EINA_FALSE;
+        if (ec->launching == EINA_TRUE)
+          {
+             ec->launching = EINA_FALSE;
+             e_comp_object_signal_emit(ec->frame, "e,action,launch,done", "e");
+          }
+     }
 }
 
 static E_Effect_Client*
@@ -435,6 +446,9 @@ _e_mod_effect_cb_visible(void *data, Evas_Object *obj, const char *signal)
    e_comp_override_add();
 //   e_client_visibility_skip_set(ec, EINA_TRUE);
 
+   EFFINF("SET EXTRA_ANIMATING...", ec->pixmap, ec);
+   ec->extra_animating = EINA_TRUE;
+
    _e_mod_effect_object_setup(ec);
    e_comp_object_effect_params_set(ec->frame, 0, (int[]){0}, 1);
    if (e_comp->nocomp)
@@ -758,6 +772,24 @@ _e_mod_effect_cb_restack_finish_done(void *data, Evas_Object *obj, const char *s
    if ((ec = (E_Client*)data))
      {
         _e_mod_effect_event_send(ec, EINA_FALSE, E_EFFECT_TYPE_RESTACK_HIDE);
+
+        E_Effect_Client *efc = NULL;
+        efc = _e_mod_effect_client_get(ec);
+        if (efc && efc->reverse_ec)
+          {
+             E_Client *ec_home = efc->reverse_ec;
+             if (ec_home->extra_animating)
+               {
+                  ec_home->extra_animating = EINA_FALSE;
+                  if (ec_home->launching == EINA_TRUE)
+                    {
+                       ec_home->launching = EINA_FALSE;
+                       e_comp_object_signal_emit(ec_home->frame, "e,action,launch,done", "e");
+                    }
+                  _e_mod_effect_unref(ec_home);
+               }
+          }
+
         _e_mod_effect_unref(ec);
      }
    e_comp_override_del();
@@ -769,6 +801,7 @@ _e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
    E_Client *ec;
    E_Effect_Group group;
    const char *emission;
+   E_Client *ec_home = NULL;
 
    if (!_effect) return EINA_FALSE;
 
@@ -799,6 +832,7 @@ _e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
         if (!below) return EINA_FALSE;
         if (e_util_strcmp(signal, "e,action,restack,show")) return EINA_FALSE;
 
+        ec_home = ec;
         ec = below;
         group = _e_mod_effect_group_get(ec);
 
@@ -810,6 +844,9 @@ _e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
    if ((!e_util_strcmp(emission, "e,action,restack,show")))
      {
         if (!_e_mod_effect_ref(ec)) return EINA_FALSE;
+
+        EFFINF("SET EXTRA_ANIMATING...", ec->pixmap, ec);
+        ec->extra_animating = EINA_TRUE;
 
         e_comp_override_add();
 
@@ -834,6 +871,25 @@ _e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
    else if (!e_util_strcmp(emission, "e,action,restack,hide"))
      {
         if (!_e_mod_effect_ref(ec)) return EINA_FALSE;
+
+        if (ec_home)
+          {
+             E_Effect_Client *efc = NULL;
+             efc = _e_mod_effect_client_get(ec);
+             if (efc)
+               {
+                  if (_e_mod_effect_ref(ec_home))
+                    {
+                       EFFINF("SET EXTRA_ANIMATING...", ec_home->pixmap, ec_home);
+                       ec_home->extra_animating = EINA_TRUE;
+
+                       efc->reverse_ec = ec_home;
+
+                       EFFINF("SET EXTRA_ANIMATING...", ec->pixmap, ec);
+                       ec->extra_animating = EINA_TRUE;
+                    }
+               }
+          }
 
         e_comp_override_add();
 
@@ -875,6 +931,40 @@ _e_mod_effect_cb_restack(void *data, Evas_Object *obj, const char *signal)
 
         e_comp_object_effect_start(ec->frame, _e_mod_effect_cb_restack_finish_done, ec);
      }
+
+   return EINA_TRUE;
+}
+
+static Eina_Bool
+_e_mod_effect_cb_launch(void *data, Evas_Object *obj, const char *signal)
+{
+   E_Client *ec;
+   struct wl_resource *surface_resource;
+   struct wl_resource *effect_resource;
+   struct wl_client *wc;
+   unsigned int tizen_effect_type = 4;
+
+   if (!_effect) return EINA_FALSE;
+
+   ec = e_comp_object_client_get(obj);
+   if ((!ec) || (!ec->comp_data)) return EINA_FALSE;
+   if (e_object_is_del(E_OBJECT(ec))) return EINA_FALSE;
+
+   surface_resource = ec->comp_data->surface;
+   if (!surface_resource) return EINA_FALSE;
+
+   wc = wl_resource_get_client(surface_resource);
+   if (!wc) return EINA_FALSE;
+
+   effect_resource = eina_hash_find(_effect->resources, &wc);
+   if (!effect_resource) return EINA_FALSE;
+
+   EFFINF("SEND END  |type:LAUNCH|win:0x%08x|tz_effect:0x%08x",
+          ec->pixmap, ec,
+          (unsigned int)e_client_util_win_get(ec),
+          (unsigned int)effect_resource);
+
+   tizen_effect_send_end(effect_resource, surface_resource, tizen_effect_type);
 
    return EINA_TRUE;
 }
@@ -1122,6 +1212,12 @@ e_mod_effect_init(void)
                        e_comp_object_effect_mover_add(100,
                                                       "e,action,restack*",
                                                       _e_mod_effect_cb_restack,
+                                                      effect));
+   effect->providers =
+      eina_list_append(effect->providers,
+                       e_comp_object_effect_mover_add(100,
+                                                      "e,action,launch,done",
+                                                      _e_mod_effect_cb_launch,
                                                       effect));
 
    _effect = effect;
